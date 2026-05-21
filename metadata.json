@@ -1,0 +1,10 @@
+{
+  "name": "BookFlix",
+  "description": "Un'app stile Netflix per tracciare le letture, visualizzare i libri su uno scaffale 3D interattivo, scansionare l'EAN dalla fotocamera e ricevere raccomandazioni dall'AI.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
