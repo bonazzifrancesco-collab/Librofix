@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "book": {
+      "title": "Book",
+      "description": "Un libro salvato nello scaffale personale dell'utente su Libroflix",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Il titolo del libro" },
+        "author": { "type": "string", "description": "L'autore" },
+        "genre": { "type": "string", "description": "Il genere letterario" },
+        "pages": { "type": "integer", "description": "Totale pagine" },
+        "currentPage": { "type": "integer", "description": "Pagina corrente o progresso di lettura" },
+        "coverUrl": { "type": "string", "description": "Link URL all'immagine di copertina" },
+        "ean": { "type": "string", "description": "Codice EAN o ISBN" },
+        "description": { "type": "string", "description": "Descrizione, scheda o trama" },
+        "status": { "type": "string", "enum": ["planning", "reading", "completed"], "description": "Stato di lettura" },
+        "startDate": { "type": "string", "description": "Formato YYYY-MM-DD" },
+        "endDate": { "type": "string", "description": "Formato YYYY-MM-DD" },
+        "rating": { "type": "integer", "description": "Voto da 1 a 10" },
+        "review": { "type": "string", "description": "Recensione o commenti personali" },
+        "spineColor": { "type": "string", "description": "Colore esadecimale per la costa 3D" },
+        "spineHeight": { "type": "integer", "description": "Altezza della costa 3D" },
+        "spineStyle": { "type": "string", "enum": ["classic", "modern", "fancy", "minimalist"], "description": "Stile grafico della costa" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Data creazione" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Ultimo aggiornamento" }
+      },
+      "required": ["title", "author", "genre", "pages", "currentPage", "status", "spineColor", "spineHeight", "spineStyle"]
+    }
+  },
+  "firestore": {
+    "users/{userId}/books/{bookId}": {
+      "schema": "book",
+      "description": "La collezione dei libri di ciascun utente, protetta per garantire l'accesso esclusivo al rispettivo proprietario"
+    }
+  }
+}

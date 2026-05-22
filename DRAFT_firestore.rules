@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Hardened Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helper representing our 'Book' schema ---
+    function isValidBook(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 500
+        && data.author is string && data.author.size() > 0 && data.author.size() <= 500
+        && data.genre is string && data.genre.size() > 0 && data.genre.size() <= 100
+        && data.pages is int && data.pages >= 1 && data.pages <= 20000
+        && data.currentPage is int && data.currentPage >= 0 && data.currentPage <= data.pages
+        && (!('coverUrl' in data) || data.coverUrl is string && data.coverUrl.size() <= 2048)
+        && (!('ean' in data) || data.ean is string && data.ean.size() <= 100)
+        && (!('description' in data) || data.description is string && data.description.size() <= 10000)
+        && data.status is string && (data.status == 'planning' || data.status == 'reading' || data.status == 'completed')
+        && (!('startDate' in data) || data.startDate is string && data.startDate.size() <= 50)
+        && (!('endDate' in data) || data.endDate is string && data.endDate.size() <= 50)
+        && (!('rating' in data) || data.rating is int && data.rating >= 1 && data.rating <= 10)
+        && (!('review' in data) || data.review is string && data.review.size() <= 10000)
+        && data.spineColor is string && data.spineColor.size() <= 50
+        && data.spineHeight is int && data.spineHeight >= 50 && data.spineHeight <= 300
+        && data.spineStyle is string && (data.spineStyle == 'classic' || data.spineStyle == 'modern' || data.spineStyle == 'fancy' || data.spineStyle == 'minimalist');
+    }
+
+    // --- User Profiles and Subcollections match block ---
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create, update: if isOwner(userId);
+
+      // Relational Subcollection of books per user
+      match /books/{bookId} {
+        allow read: if isOwner(userId);
+        
+        allow create: if isOwner(userId) 
+          && isValidBook(incoming())
+          && isValidId(bookId)
+          && incoming().createdAt == request.time;
+          
+        allow update: if isOwner(userId)
+          && isValidBook(incoming())
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time;
+          
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

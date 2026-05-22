@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -365,23 +364,39 @@ app.post("/api/book/recommend", async (req, res) => {
 
 // Setup dev vs production environments
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+  // Safely detect if running in production bundle or stand-alone environment
+  const isProdFile = typeof __filename !== "undefined" && __filename.includes("server.cjs");
+  const isProdArg = !process.argv[1]?.endsWith("server.ts");
+  const isProduction = process.env.NODE_ENV === "production" || isProdFile || isProdArg;
+
+  if (!isProduction) {
+    try {
+      console.log("[BookFlix Server] Initializing Vite dev server in development mode...");
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      console.warn("[BookFlix Server] Failed to initialize Vite dev server, falling back to production mode.", err);
+      serveStatic();
+    }
   } else {
-    // Serve static files from compiled dist folder in prod
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    console.log("[BookFlix Server] Launching in production mode; serving pre-compiled static assets.");
+    serveStatic();
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[BookFlix Server] Active at http://0.0.0.0:${PORT}`);
+  });
+}
+
+function serveStatic() {
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
   });
 }
 

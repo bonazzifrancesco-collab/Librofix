@@ -1,0 +1,10 @@
+{
+  "projectId": "bookflix-da48a",
+  "appId": "1:356068434658:web:4d6aa2d0a8f2cf019774bb",
+  "apiKey": "AIzaSyD47siuOYTwqgc3TYCY-mXwr3OwQS7FvLI",
+  "authDomain": "bookflix-da48a.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "bookflix-da48a.firebasestorage.app",
+  "messagingSenderId": "356068434658",
+  "measurementId": ""
+}

@@ -8,6 +8,11 @@ import StatsDashboard from './components/StatsDashboard';
 import RecommendationsList from './components/RecommendationsList';
 import { Sparkles, BookOpen, Layers, TrendingUp, Camera, Plus, HelpCircle, Info } from 'lucide-react';
 
+// Firebase imports
+import { auth, db, loginWithGoogle, logoutUser, handleFirestoreError, OperationType } from './lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { collection, doc, onSnapshot, setDoc, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+
 const SEED_BOOKS: Book[] = [
   {
     id: 'seed-1',
@@ -103,11 +108,12 @@ const DEFAULT_RECOMMENDATIONS: BookRecommendation[] = [
 ];
 
 export default function App() {
-  // Main state trackers
-  const [books, setBooks] = useState<Book[]>(() => {
-    const saved = localStorage.getItem('bookflix_books');
-    return saved ? JSON.parse(saved) : SEED_BOOKS;
-  });
+  // 1. Auth & Firebase state
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+
+  // 2. Main data trackers
+  const [books, setBooks] = useState<Book[]>([]);
 
   const [recommendations, setRecommendations] = useState<BookRecommendation[]>(() => {
     const saved = localStorage.getItem('bookflix_recommendations');
@@ -124,32 +130,170 @@ export default function App() {
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [scannedBookData, setScannedBookData] = useState<any | null>(null);
 
-  // Sync state to LocalStorage
+  // Sync Authentication state
   useEffect(() => {
-    localStorage.setItem('bookflix_books', JSON.stringify(books));
-  }, [books]);
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsLoadingAuth(false);
+    });
+    return () => unsubscribeAuth();
+  }, []);
+
+  // Sync state with Storage / Firestore
+  useEffect(() => {
+    if (isLoadingAuth) return;
+
+    if (!user) {
+      // Offline fallback / local storage for unauthenticated visitors
+      const saved = localStorage.getItem('bookflix_books');
+      setBooks(saved ? JSON.parse(saved) : SEED_BOOKS);
+      return;
+    }
+
+    // Authenticated Firestore sync listener
+    const path = `users/${user.uid}/books`;
+    const unsubFirestore = onSnapshot(collection(db, path), (snapshot) => {
+      const dbBooks: Book[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        dbBooks.push({
+          id: docSnap.id,
+          title: data.title || "",
+          author: data.author || "",
+          genre: data.genre || "",
+          pages: Number(data.pages) || 0,
+          currentPage: Number(data.currentPage) || 0,
+          coverUrl: data.coverUrl || "",
+          ean: data.ean || "",
+          description: data.description || "",
+          status: data.status,
+          startDate: data.startDate || "",
+          endDate: data.endDate || "",
+          rating: data.rating !== undefined ? Number(data.rating) : undefined,
+          review: data.review || "",
+          spineColor: data.spineColor || "#5c2020",
+          spineHeight: Number(data.spineHeight) || 140,
+          spineStyle: data.spineStyle || "classic",
+        });
+      });
+      // Order books consistently (e.g., newest additions first)
+      setBooks(dbBooks.sort((a,b) => b.id.localeCompare(a.id)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, path);
+    });
+
+    return () => unsubFirestore();
+  }, [user, isLoadingAuth]);
+
+  // Sync books state to LocalStorage as a backup (only for unauthenticated demo mode)
+  useEffect(() => {
+    if (!isLoadingAuth && !user) {
+      localStorage.setItem('bookflix_books', JSON.stringify(books));
+    }
+  }, [books, user, isLoadingAuth]);
 
   // Add customized book
-  const handleAddBook = (newBookData: Omit<Book, 'id'>) => {
+  const handleAddBook = async (newBookData: Omit<Book, 'id'>) => {
+    const bookId = `book-${Date.now()}`;
     const newBook: Book = {
       ...newBookData,
-      id: `book-${Date.now()}`,
+      id: bookId,
     };
-    setBooks((prev) => [newBook, ...prev]);
-    setIsAddBookModalOpen(false);
-    setScannedBookData(null);
+
+    if (!user) {
+      setBooks((prev) => [newBook, ...prev]);
+      setIsAddBookModalOpen(false);
+      setScannedBookData(null);
+      return;
+    }
+
+    const path = `users/${user.uid}/books`;
+    try {
+      const docRef = doc(db, path, bookId);
+      const payload: any = {
+        title: newBookData.title,
+        author: newBookData.author,
+        genre: newBookData.genre,
+        pages: Number(newBookData.pages),
+        currentPage: Number(newBookData.currentPage),
+        status: newBookData.status,
+        spineColor: newBookData.spineColor,
+        spineHeight: Number(newBookData.spineHeight),
+        spineStyle: newBookData.spineStyle,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      };
+      if (newBookData.coverUrl) payload.coverUrl = newBookData.coverUrl;
+      if (newBookData.ean) payload.ean = newBookData.ean;
+      if (newBookData.description) payload.description = newBookData.description;
+      if (newBookData.startDate) payload.startDate = newBookData.startDate;
+      if (newBookData.endDate) payload.endDate = newBookData.endDate;
+      if (newBookData.rating !== undefined && newBookData.rating !== null) payload.rating = Number(newBookData.rating);
+      if (newBookData.review) payload.review = newBookData.review;
+
+      await setDoc(docRef, payload);
+      setIsAddBookModalOpen(false);
+      setScannedBookData(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${path}/${bookId}`);
+    }
   };
 
   // Update existing book
-  const handleUpdateBook = (updatedBook: Book) => {
-    setBooks((prev) => prev.map((b) => (b.id === updatedBook.id ? updatedBook : b)));
-    setSelectedBook(null);
+  const handleUpdateBook = async (updatedBook: Book) => {
+    if (!user) {
+      setBooks((prev) => prev.map((b) => (b.id === updatedBook.id ? updatedBook : b)));
+      setSelectedBook(null);
+      return;
+    }
+
+    const path = `users/${user.uid}/books`;
+    const bookId = updatedBook.id;
+    try {
+      const docRef = doc(db, path, bookId);
+      const payload: any = {
+        title: updatedBook.title,
+        author: updatedBook.author,
+        genre: updatedBook.genre,
+        pages: Number(updatedBook.pages),
+        currentPage: Number(updatedBook.currentPage),
+        status: updatedBook.status,
+        spineColor: updatedBook.spineColor,
+        spineHeight: Number(updatedBook.spineHeight),
+        spineStyle: updatedBook.spineStyle,
+        updatedAt: serverTimestamp()
+      };
+      if (updatedBook.coverUrl) payload.coverUrl = updatedBook.coverUrl;
+      if (updatedBook.ean) payload.ean = updatedBook.ean;
+      if (updatedBook.description) payload.description = updatedBook.description;
+      if (updatedBook.startDate) payload.startDate = updatedBook.startDate;
+      if (updatedBook.endDate) payload.endDate = updatedBook.endDate;
+      if (updatedBook.rating !== undefined && updatedBook.rating !== null) payload.rating = Number(updatedBook.rating);
+      if (updatedBook.review) payload.review = updatedBook.review;
+
+      await updateDoc(docRef, payload);
+      setSelectedBook(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `${path}/${bookId}`);
+    }
   };
 
   // Delete book from catalog
-  const handleDeleteBook = (bookId: string) => {
-    setBooks((prev) => prev.filter((b) => b.id !== bookId));
-    setSelectedBook(null);
+  const handleDeleteBook = async (bookId: string) => {
+    if (!user) {
+      setBooks((prev) => prev.filter((b) => b.id !== bookId));
+      setSelectedBook(null);
+      return;
+    }
+
+    const path = `users/${user.uid}/books`;
+    try {
+      const docRef = doc(db, path, bookId);
+      await deleteDoc(docRef);
+      setSelectedBook(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${bookId}`);
+    }
   };
 
   // Web camera scanner success callback
@@ -236,6 +380,42 @@ export default function App() {
           {/* Core Action triggers */}
           <div className="flex items-center gap-2 md:gap-4">
             
+            {/* User Logged in state / login buttons */}
+            {isLoadingAuth ? (
+              <div className="text-xs text-zinc-500 animate-pulse font-mono py-1">Caricamento...</div>
+            ) : user ? (
+              <div className="flex items-center gap-2 md:gap-3 bg-black/40 border border-zinc-800 p-1 pl-3 rounded-full">
+                <div className="hidden sm:flex flex-col text-right">
+                  <span className="text-[10px] font-black tracking-wider uppercase text-zinc-300 truncate max-w-[100px] leading-tight">
+                    {user.displayName || "Lettore"}
+                  </span>
+                  <span className="text-[8px] font-mono text-emerald-400 font-bold leading-none select-none flex items-center justify-end gap-0.5">
+                    ● CLOUD ON
+                  </span>
+                </div>
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-red-650/40 shadow shadow-red-500/10" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-red-800 text-white font-black text-xs flex items-center justify-center border border-red-650">
+                    {user.displayName ? user.displayName[0].toUpperCase() : "U"}
+                  </div>
+                )}
+                <button
+                  onClick={logoutUser}
+                  className="bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-[10px] font-bold py-1 px-2.5 rounded-full text-zinc-400 hover:text-white transition active:scale-95"
+                >
+                  Esci
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={loginWithGoogle}
+                className="bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-300 text-[11px] font-bold uppercase tracking-wider py-1.5 px-3 rounded-full flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
+              >
+                <span>Accedi con Google</span>
+              </button>
+            )}
+
             {/* Camera Scanner Trigger */}
             <button
               id="header-scanner-btn"
@@ -270,8 +450,13 @@ export default function App() {
         {/* Welcome message banner and metadata panel info box */}
         <div className="bg-gradient-to-r from-red-950/20 to-zinc-900/40 border border-red-950/10 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-xl md:text-2xl font-black tracking-tight font-serif text-amber-100">
-              Il tuo scaffale letterario Netflix
+            <h1 className="text-xl md:text-2xl font-black tracking-tight font-serif text-amber-100 flex items-center gap-2 flex-wrap">
+              <span>Il tuo scaffale letterario Netflix</span>
+              {user && (
+                <span className="text-[9px] uppercase font-mono bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold self-center shadow-sm">
+                  ☁️ Firebase Cloud ON
+                </span>
+              )}
             </h1>
             <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl">
               Fai fare un salto di qualità alla tua libreria domestica! Inquadra i libri con la fotocamera per catalogarli con l'AI o aggiungili cercando online. Recensisci le letture e ricevi raccomandazioni letterarie intelligenti basate sui tuoi voti.
@@ -279,11 +464,28 @@ export default function App() {
           </div>
 
           {/* Quick instructions indicator tooltip */}
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-950/50 border border-zinc-900 shrink-0 text-left text-xs text-zinc-400 font-medium max-w-xs">
-            <Info className="w-4 h-4 text-amber-500 shrink-0" />
-            <p className="leading-normal">
-              <b>Fotocamera spenta?</b> Trascina o sfoglia immagini o usa la barra di ricerca!
-            </p>
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-950/50 border border-zinc-900 shrink-0 text-left text-xs text-zinc-400 font-medium max-w-xs transition duration-300">
+            {user ? (
+              <div className="flex items-start gap-2">
+                <span className="text-lg">☁️</span>
+                <div>
+                  <p className="font-bold text-slate-200 text-xs">Database Firebase Attivo</p>
+                  <p className="text-[10px] text-zinc-400 leading-normal mt-0.5">
+                    Tutti i tuoi scaffali e recensioni sono salvati sul cloud di Google.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-2 cursor-pointer" onClick={loginWithGoogle}>
+                <span className="text-lg">⚠️</span>
+                <div>
+                  <p className="font-bold text-amber-400 text-xs">Salvataggio Locale</p>
+                  <p className="text-[10px] text-zinc-400 leading-normal mt-0.5">
+                    In modalità Demo locale. <u>Accedi con Google</u> per attivare il database Firebase!
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
