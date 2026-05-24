@@ -1,27 +1,32 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 async function fetchGoogleBooks(query: string, limit = 1) {
-  const response = await fetch(
-    `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}`
-  );
-  if (!response.ok) return [];
-  const data = await response.json();
-  if (!data.items) return [];
-  return data.items.map((item: any) => {
-    const info = item.volumeInfo || {};
-    const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
-    let coverUrl = info.imageLinks?.thumbnail || '';
-    if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-    return {
-      title: info.title || 'Sconosciuto',
-      author: info.authors?.join(', ') || 'Sconosciuto',
-      genre: info.categories?.[0] || 'Generico',
-      pages: info.pageCount || 200,
-      description: info.description || '',
-      ean: isbnObj?.identifier || '',
-      coverUrl,
-    };
-  });
+  try {
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+    const response = await fetch(
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
+    );
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data.items) return [];
+    return data.items.map((item: any) => {
+      const info = item.volumeInfo || {};
+      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
+      let coverUrl = info.imageLinks?.thumbnail || '';
+      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
+      return {
+        title: info.title || 'Sconosciuto',
+        author: info.authors?.join(', ') || 'Sconosciuto',
+        genre: info.categories?.[0] || 'Generico',
+        pages: info.pageCount || 200,
+        description: info.description || '',
+        ean: isbnObj?.identifier || '',
+        coverUrl,
+      };
+    });
+  } catch {
+    return [];
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
