@@ -1,29 +1,29 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
-import { doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 
-// 1. Initialize Firebase Services
+const firebaseConfig = {
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
+};
+
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore database cleanly
-const dbId = firebaseConfig.firestoreDatabaseId === '(default)' || !firebaseConfig.firestoreDatabaseId 
-  ? undefined 
-  : firebaseConfig.firestoreDatabaseId;
-
-export const db = dbId ? getFirestore(app, dbId) : getFirestore(app); /* CRITICAL: The app will break without this line */
+export const db   = getFirestore(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// 2. Types of Firestore Operations for Error Mapping
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
   DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
+  LIST   = 'list',
+  GET    = 'get',
+  WRITE  = 'write',
 }
 
 export interface FirestoreErrorInfo {
@@ -35,60 +35,44 @@ export interface FirestoreErrorInfo {
     email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
   };
 }
 
-// 3. Mandatory Firestore Error Handler to output structured context on access denied
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
+      userId:        auth.currentUser?.uid,
+      email:         auth.currentUser?.email,
       emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
+      isAnonymous:   auth.currentUser?.isAnonymous,
     },
     operationType,
-    path
+    path,
   };
-  console.error('Firestore Error Details: ', JSON.stringify(errInfo));
+  console.error('Firestore Error Details:', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
 
-// 4. Validate connection to Firestore on initial boot
 export async function testConnection() {
   try {
-    // Attempting a simple client-side lookup to verify setup credentials
     await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log('[Firebase] Connection validation succeeded.');
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("[Firebase] Connection check: Client appears offline. Please check your network or configuration.");
-    } else {
-      console.log("[Firebase] Connection check baseline passed (received normal response or default rules block).");
+      console.error('[Firebase] Client offline.');
     }
+    // Errore normale se le rules bloccano — è atteso
   }
 }
 
 testConnection();
 
-// Simple Helper for standard web logging
 export async function loginWithGoogle() {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   } catch (error) {
-    console.error("Google Authentication error:", error);
+    console.error('Google Authentication error:', error);
     throw error;
   }
 }
@@ -97,6 +81,6 @@ export async function logoutUser() {
   try {
     await signOut(auth);
   } catch (error) {
-    console.error("Sign out error:", error);
+    console.error('Sign out error:', error);
   }
 }
