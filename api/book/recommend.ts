@@ -9,8 +9,9 @@ function getGemini() {
 
 async function fetchGoogleBooks(query: string, limit = 1) {
   try {
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
     const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}`
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
     );
     if (!response.ok) return [];
     const data = await response.json();
@@ -20,10 +21,7 @@ async function fetchGoogleBooks(query: string, limit = 1) {
       const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
       let coverUrl = info.imageLinks?.thumbnail || '';
       if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-      return {
-        ean: isbnObj?.identifier || '',
-        coverUrl,
-      };
+      return { ean: isbnObj?.identifier || '', coverUrl };
     });
   } catch {
     return [];
