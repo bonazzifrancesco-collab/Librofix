@@ -4,6 +4,7 @@ import BookShelf from './components/BookShelf';
 import ScannerModal from './components/ScannerModal';
 import AddBookModal from './components/AddBookModal';
 import BookDetailsModal from './components/BookDetailsModal';
+import AuthErrorModal from './components/AuthErrorModal';
 import StatsDashboard from './components/StatsDashboard';
 import RecommendationsList from './components/RecommendationsList';
 import { Sparkles, BookOpen, Layers, TrendingUp, Camera, Plus, HelpCircle, Info } from 'lucide-react';
@@ -111,6 +112,19 @@ export default function App() {
   // 1. Auth & Firebase state
   const [user, setUser] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [authError, setAuthError] = useState<{ code: string; message: string; domain?: string } | null>(null);
+
+  const handleSignIn = async () => {
+    try {
+      setAuthError(null);
+      await loginWithGoogle();
+    } catch (error: any) {
+      console.error("Google authentication action trigger failed:", error);
+      const code = error?.code || "unknown";
+      const msg = error?.message || String(error);
+      setAuthError({ code, message: msg, domain: window.location.hostname });
+    }
+  };
 
   // 2. Main data trackers
   const [books, setBooks] = useState<Book[]>([]);
@@ -234,8 +248,14 @@ export default function App() {
       await setDoc(docRef, payload);
       setIsAddBookModalOpen(false);
       setScannedBookData(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `${path}/${bookId}`);
+    } catch (error: any) {
+      console.error("Firestore create error caught:", error);
+      const code = error?.code || "permission-denied";
+      const message = error?.message || String(error);
+      setAuthError({ code, message, domain: window.location.hostname });
+      try {
+        handleFirestoreError(error, OperationType.CREATE, `${path}/${bookId}`);
+      } catch (e) {}
     }
   };
 
@@ -273,8 +293,14 @@ export default function App() {
 
       await updateDoc(docRef, payload);
       setSelectedBook(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `${path}/${bookId}`);
+    } catch (error: any) {
+      console.error("Firestore update error caught:", error);
+      const code = error?.code || "permission-denied";
+      const message = error?.message || String(error);
+      setAuthError({ code, message, domain: window.location.hostname });
+      try {
+        handleFirestoreError(error, OperationType.UPDATE, `${path}/${bookId}`);
+      } catch (e) {}
     }
   };
 
@@ -291,8 +317,14 @@ export default function App() {
       const docRef = doc(db, path, bookId);
       await deleteDoc(docRef);
       setSelectedBook(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `${path}/${bookId}`);
+    } catch (error: any) {
+      console.error("Firestore delete error caught:", error);
+      const code = error?.code || "permission-denied";
+      const message = error?.message || String(error);
+      setAuthError({ code, message, domain: window.location.hostname });
+      try {
+        handleFirestoreError(error, OperationType.DELETE, `${path}/${bookId}`);
+      } catch (e) {}
     }
   };
 
@@ -409,7 +441,7 @@ export default function App() {
               </div>
             ) : (
               <button
-                onClick={loginWithGoogle}
+                onClick={handleSignIn}
                 className="bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-300 text-[11px] font-bold uppercase tracking-wider py-1.5 px-3 rounded-full flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
               >
                 <span>Accedi con Google</span>
@@ -476,7 +508,7 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-2 cursor-pointer" onClick={loginWithGoogle}>
+              <div className="flex items-start gap-2 cursor-pointer" onClick={handleSignIn}>
                 <span className="text-lg">⚠️</span>
                 <div>
                   <p className="font-bold text-amber-400 text-xs">Salvataggio Locale</p>
@@ -591,6 +623,14 @@ export default function App() {
           onClose={() => setSelectedBook(null)}
           onUpdateBook={handleUpdateBook}
           onDeleteBook={handleDeleteBook}
+        />
+      )}
+
+      {/* 7. DIAGNOSTIC AUTH ERROR TROUBLESHOOTER MODAL */}
+      {authError && (
+        <AuthErrorModal
+          error={authError}
+          onClose={() => setAuthError(null)}
         />
       )}
 

@@ -6,7 +6,13 @@ import { doc, getDocFromServer } from 'firebase/firestore';
 
 // 1. Initialize Firebase Services
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+
+// Initialize Firestore database cleanly
+const dbId = firebaseConfig.firestoreDatabaseId === '(default)' || !firebaseConfig.firestoreDatabaseId 
+  ? undefined 
+  : firebaseConfig.firestoreDatabaseId;
+
+export const db = dbId ? getFirestore(app, dbId) : getFirestore(app); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 

@@ -11,8 +11,12 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const activeRequestId = useRef<number>(0);
+  
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
   const [cameraActive, setCameraActive] = useState(false);
 
@@ -45,43 +49,89 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
   // Start the Webcam
   const startCamera = async () => {
     setError(null);
+    setIsCameraLoading(true);
+    setCameraActive(false);
+
+    const reqId = ++activeRequestId.current;
+
     try {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+      setStream(null);
+
+      let mediaStream: MediaStream;
+      try {
+        // 1. Try optimal back camera constraints: environment, widescreen ideal
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch (firstErr) {
+        console.warn("[Camera] Optimal environment parameters failed, trying generic environment...", firstErr);
+        try {
+          // 2. Try standard back camera
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment' },
+            audio: false,
+          });
+        } catch (secondErr) {
+          console.warn("[Camera] Environment camera failed, trying any video camera...", secondErr);
+          // 3. Try ultimate fallback of any camera stream (e.g. laptop webcam, front cam, default usb)
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
       }
 
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      });
+      // Check if this is still the active/latest request to avoid racing
+      if (reqId !== activeRequestId.current) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
+      streamRef.current = mediaStream;
       setStream(mediaStream);
+      
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         setCameraActive(true);
       }
     } catch (err: any) {
-      console.error("Camera access error:", err);
-      setError("Impossibile accedere alla fotocamera nell'anteprima integrata (sandbox iframe). Per usare la fotocamera senza blocchi, apri l'applicazione in una NUOVA SCHEDA cliccando sull'icona con la freccetta 'Apri in una nuova scheda' in alto a destra sopra l'anteprima!");
+      if (reqId !== activeRequestId.current) return;
+      console.error("[Camera] All camera access attempts failed:", err);
+      setError(
+        window.self !== window.top 
+          ? "Impossibile avviare la fotocamera dentro l'iframe di anteprima. Clicca su 'Apri in una Nuova Scheda' per farle funzionare!"
+          : "Impossibile avviare la fotocamera. Verifica che i permessi nel browser siano attivi e che non sia già in uso da un'altra app."
+      );
+    } finally {
+      if (reqId === activeRequestId.current) {
+        setIsCameraLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     startCamera();
     return () => {
-      // Cleanup video tracks on unmount
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+      activeRequestId.current = 999999;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
       }
     };
   }, []);
 
   // Stop current camera tracks
   const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
+    setStream(null);
     setCameraActive(false);
   };
 
@@ -221,22 +271,6 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
         {/* Modal Body */}
         <div className="p-6 space-y-6">
           
-          {error && (
-            <div className="bg-red-950/40 border border-red-800/50 p-3.5 rounded-xl text-red-200 text-xs flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-400" />
-              <div className="flex-1 space-y-1">
-                <span className="font-semibold text-red-300">Errore Fotocamera:</span>
-                <p>{error}</p>
-                <button
-                  onClick={startCamera}
-                  className="text-[10px] text-red-400 font-bold uppercase underline hover:text-white transition block pt-1.5"
-                >
-                  Riprova fotocamera
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* AIScanner Screen Section */}
           <div className="relative">
             {isLoading ? (
@@ -273,14 +307,14 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                     <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-red-500"></div>
                     <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-red-500"></div>
                     <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-red-500"></div>
-
+ 
                     {/* Laser guidance text */}
                     <div className="absolute inset-x-0 bottom-4 text-center text-[10px] text-white/80 bg-black/60 py-1 px-3 mx-10 rounded-full select-none backdrop-blur-xs font-mono">
                       Inquadra Codice EAN o Copertina
                     </div>
                   </div>
                 </div>
-
+ 
                 {/* Instant capture Button */}
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                   <button
@@ -292,22 +326,59 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                   </button>
                 </div>
               </div>
-            ) : (
-              // Webcam not active or loading fallback
+            ) : isCameraLoading ? (
+              // Webcam initializing / loading screen
               <div className="w-full aspect-video rounded-xl bg-zinc-900/40 border border-zinc-850 flex flex-col items-center justify-center p-6 text-center text-zinc-500">
-                <AlertCircle className="w-8 h-8 text-amber-500 mb-2" />
-                <p className="text-sm font-semibold text-zinc-300">Sandbox Iframe Attiva</p>
-                <p className="text-[11px] text-zinc-500 max-w-xs mt-1 leading-relaxed">
-                  I browser spesso bloccano l'hardware nei frame integrati. Apri Libroflix in una <b>nuova scheda</b> (pulsante in alto a destra sopra la preview) per usare la fotocamera!
+                <Loader className="w-8 h-8 text-red-500 animate-spin mb-3" />
+                <p className="text-sm font-semibold text-zinc-350">Richiesta Accesso Fotocamera...</p>
+                <p className="text-[11px] text-zinc-500 max-w-sm mt-1.5 leading-relaxed">
+                  Consenti l'uso della fotocamera se richiesto dal browser per scansionare libri con l'IA.
                 </p>
-                <div className="flex gap-2.5 mt-4">
+              </div>
+            ) : error ? (
+              // Specific, clean contextual error state
+              <div className="w-full aspect-video rounded-xl bg-zinc-900/60 border border-zinc-850 flex flex-col items-center justify-center p-6 text-center">
+                <AlertCircle className="w-10 h-10 text-red-500 mb-3" />
+                <h4 className="text-sm font-bold text-red-400 uppercase tracking-widest leading-none mb-1.5">Fotocamera non Disponibile</h4>
+                
+                {window.self !== window.top ? (
+                  <>
+                    <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed mb-4">
+                      Sei dentro l'iframe di anteprima di AI Studio. Di solito i browser bloccano l'hardware nei frame integrati.
+                    </p>
+                    <div className="bg-amber-950/20 border border-amber-800/30 p-2 text-[10px] text-amber-200 rounded-lg max-w-xs mb-4 mx-auto">
+                      N.B. Clicca su <b>"Apri in una Nuova Scheda"</b> in alto a destra sopra la preview per usare la fotocamera senza blocchi!
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed mb-4 mx-auto">
+                    {error}
+                  </p>
+                )}
+                
+                <div className="flex gap-3 justify-center">
                   <button
                     onClick={startCamera}
-                    className="text-xs bg-red-650 hover:bg-red-700 text-white hover:text-white py-1.5 px-4 rounded-full font-bold uppercase tracking-wider transition"
+                    className="text-xs bg-red-650 hover:bg-red-700 text-white font-bold py-1.5 px-5 rounded-full transition uppercase tracking-wider"
                   >
-                    Avvia Fotocamera
+                    Riprova
                   </button>
                 </div>
+              </div>
+            ) : (
+              // Ready state
+              <div className="w-full aspect-video rounded-xl bg-zinc-900/40 border border-zinc-850 flex flex-col items-center justify-center p-6 text-center text-zinc-500">
+                <Camera className="w-10 h-10 text-zinc-500 mb-3" />
+                <p className="text-sm font-semibold text-zinc-300">Scansiona con la Fotocamera</p>
+                <p className="text-[11px] text-zinc-500 max-w-xs mt-1 leading-relaxed">
+                  Scatta una foto della copertina o del codice a barre per compilare istantaneamente tutti i dettagli del libro.
+                </p>
+                <button
+                  onClick={startCamera}
+                  className="mt-4 text-xs bg-red-600 hover:bg-red-700 text-white py-2 px-5 rounded-full font-bold uppercase tracking-wider transition"
+                >
+                  Attiva Fotocamera
+                </button>
               </div>
             )}
           </div>
