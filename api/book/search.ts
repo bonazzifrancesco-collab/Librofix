@@ -2,8 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 async function fetchGoogleBooks(query: string, limit = 8) {
   try {
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
     const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}`
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
     );
     if (!response.ok) return [];
     const data = await response.json();
