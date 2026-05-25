@@ -1,53 +1,42 @@
-import { GoogleGenAI } from '@google/genai';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(req: Request) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
-  }
-
+async function fetchGoogleBooks(query: string, limit = 1) {
   try {
-    const { title, author } = await req.json();
-
-    if (!process.env.GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Configurazione GEMINI_API_KEY mancante' }), { status: 500 });
-    }
-
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    const prompt = `Trova i dettagli completi ed esatti per il libro intitolato "${title}" scritto da "${author || 'Autore Sconosciuto'}".
-    
-    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un singolo oggetto) con questa esatta struttura:
-    {
-      "title": "Titolo corretto",
-      "author": "Autore corretto",
-      "genre": "Genere letterario",
-      "year": "Anno di pubblicazione",
-      "description": "Trama accurata in italiano.",
-      "pages": 123
-    }`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: prompt,
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+    const response = await fetch(
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
+    );
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data.items) return [];
+    return data.items.map((item: any) => {
+      const info = item.volumeInfo || {};
+      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
+      let coverUrl = info.imageLinks?.thumbnail || '';
+      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
+      return {
+        title: info.title || 'Sconosciuto',
+        author: info.authors?.join(', ') || 'Sconosciuto',
+        genre: info.categories?.[0] || 'Generico',
+        pages: info.pageCount || 200,
+        description: info.description || '',
+        ean: isbnObj?.identifier || '',
+        coverUrl,
+      };
     });
-
-    const text = response.text;
-    if (!text) throw new Error('Nessun dato restituito');
-
-    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const bookDetails = JSON.parse(cleanJson);
-
-    return new Response(JSON.stringify(bookDetails), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (error: any) {
-    console.error('Lookup error:', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  } catch {
+    return [];
   }
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).end();
+  const { ean } = req.body;
+  if (!ean) return res.status(400).json({ error: 'EAN o titolo mancante' });
+
+  const results = await fetchGoogleBooks(ean, 1);
+  if (results.length > 0) {
+    return res.json(results[0]);
+  }
+  res.status(404).json({ error: 'Libro non trovato' });
 }
