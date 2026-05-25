@@ -1,46 +1,26 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI, Type } from '@google/genai';
 
-function getGemini() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY non configurata su Vercel.');
-  
-  // Inizializzazione nativa pulita per l'SDK 1.29.0
-  return new GoogleGenAI({ apiKey: key });
-}
+// Inizializzazione immediata e pulita dell'SDK
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
-async function fetchGoogleBooks(query: string, limit = 1) {
-  try {
-    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-    const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
-    if (!data.items) return [];
-    return data.items.map((item: any) => {
-      const info = item.volumeInfo || {};
-      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
-      let coverUrl = info.imageLinks?.thumbnail || '';
-      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-      return { ean: isbnObj?.identifier || '', coverUrl };
-    });
-  } catch {
-    return [];
+export default async function handler(req: any, res: any) {
+  // Gestione del metodo corretto
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
-}
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).end();
-  
   try {
     const { preferences, readingHistory } = req.body;
-    const ai = getGemini();
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY mancante su Vercel.' });
+    }
 
     const prompt = `Sei un esperto bibliotecario. Analizza i gusti dell'utente e la sua cronologia e consiglia 5 libri perfetti.
     PREFERENZE: ${preferences || 'Nessuna'}
     CRONOLOGIA: ${readingHistory ? JSON.stringify(readingHistory) : 'Nessuna'}`;
 
+    // Chiamata diretta con lo schema di validazione nativo dell'SDK 1.29
     const response = await ai.models.generateContent({
       model: 'gemini-1.5-flash-002',
       contents: prompt,
@@ -71,23 +51,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     });
 
-    const parsed = JSON.parse(response.text?.trim() || '{"recommendations":[]}');
+    const responseText = response.text;
+    if (!responseText) {
+      return res.status(500).json({ error: 'Risposta vuota ricevuta da Gemini.' });
+    }
 
-    const enriched = await Promise.all(
-      (parsed.recommendations || []).map(async (rec: any) => {
+    const parsedData = JSON.parse(responseText.trim());
+
+    // Integrazione super-leggera con Google Books per recuperare le copertine
+    const enrichedRecommendations = await Promise.all(
+      (parsedData.recommendations || []).map(async (book: any) => {
         try {
-          const googleData = await fetchGoogleBooks(`${rec.title} ${rec.author}`, 1);
-          if (googleData.length > 0) {
-            return { ...rec, coverUrl: googleData[0].coverUrl, ean: googleData[0].ean || '' };
+          const searchQuery = encodeURIComponent(`${book.title} ${book.author}`);
+          const booksApiUrl = `https://www.googleapis.com/books/v1/volumes?q=${searchQuery}&maxResults=1`;
+          
+          const booksResponse = await fetch(booksApiUrl);
+          if (booksResponse.ok) {
+            const booksData = await booksResponse.json();
+            if (booksData.items && booksData.items.length > 0) {
+              const volumeInfo = booksData.items[0].volumeInfo;
+              const identifiers = volumeInfo.industryIdentifiers || [];
+              const isbn13 = identifiers.find((id: any) => id.type === 'ISBN_13')?.identifier || '';
+              let coverUrl = volumeInfo.imageLinks?.thumbnail || '';
+              
+              if (coverUrl.startsWith('http://')) {
+                coverUrl = coverUrl.replace('http://', 'https://');
+              }
+              
+              return { ...book, coverUrl, ean: isbn13 };
+            }
           }
-        } catch {}
-        return { ...rec, coverUrl: '' };
+        } catch (e) {
+          console.error('Google Books error for ' + book.title, e);
+        }
+        return { ...book, coverUrl: '', ean: '' };
       })
     );
 
-    res.json({ recommendations: enriched });
+    return res.status(200).json({ recommendations: enrichedRecommendations });
+
   } catch (err: any) {
-    console.error('Recommend error:', err);
-    res.status(500).json({ error: 'Errore durante la generazione dei suggerimenti AI.' });
+    console.error('Recommend system error:', err);
+    return res.status(500).json({ error: 'Errore interno del server: ' + err.message });
   }
 }
