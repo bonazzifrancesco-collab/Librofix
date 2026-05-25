@@ -1,39 +1,59 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { GoogleGenAI } from '@google/genai';
 
-async function fetchGoogleBooks(query: string, limit = 8) {
-  try {
-    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-    const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
-    if (!data.items) return [];
-    return data.items.map((item: any) => {
-      const info = item.volumeInfo || {};
-      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
-      let coverUrl = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '';
-      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-      return {
-        title: info.title || 'Titolo Sconosciuto',
-        author: info.authors ? info.authors.join(', ') : 'Autore Sconosciuto',
-        genre: info.categories?.[0] || 'Generico',
-        pages: info.pageCount || 200,
-        description: info.description || 'Nessuna descrizione disponibile.',
-        ean: isbnObj ? isbnObj.identifier : '',
-        coverUrl,
-      };
-    });
-  } catch {
-    return [];
+export const config = {
+  runtime: 'edge',
+};
+
+export default async function handler(req: Request) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
-}
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).end();
-  const { query } = req.body;
-  if (!query) return res.status(400).json({ error: 'Query richiesta.' });
+  try {
+    const { query } = await req.json();
+    if (!query) {
+      return new Response(JSON.stringify({ error: 'Query mancante' }), { status: 400 });
+    }
 
-  const books = await fetchGoogleBooks(query, 12);
-  res.json({ books });
+    if (!process.env.GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Configurazione GEMINI_API_KEY mancante' }), { status: 500 });
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+    const prompt = `Cerca informazioni strutturate sul libro o sui libri che corrispondono a questa ricerca: "${query}".
+    Trova titolo, autore, genere, anno di pubblicazione originale, una breve trama in italiano e il numero di pagine approssimativo.
+    
+    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un array di oggetti) con questa esatta struttura:
+    [
+      {
+        "title": "Titolo del libro",
+        "author": "Autore",
+        "genre": "Genere principale",
+        "year": "Anno",
+        "description": "Breve trama in italiano (2-3 frasi).",
+        "pages": 300
+      }
+    ]`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: prompt,
+    });
+
+    const text = response.text;
+    if (!text) throw new Error('Nessun dato dall\'AI');
+
+    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const books = JSON.parse(cleanJson);
+
+    return new Response(JSON.stringify(books), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error: any) {
+    console.error('Search error:', error);
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
 }
