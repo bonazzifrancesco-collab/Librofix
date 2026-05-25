@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 Analizza i gusti del lettore:
 ${bookSummary}
 
-Genera esattamente 4 suggerimenti di libri REALI personalizzati. Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo prima o dopo. Struttura:
+Genera esattamente 4 suggerimenti di libri REALI personalizzati. Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo prima o dopo. Struttura esatta:
 {"recommendations":[{"title":"...","author":"...","genre":"...","description":"...","matchPercentage":95,"reason":"...","pages":300}]}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -66,7 +66,11 @@ Genera esattamente 4 suggerimenti di libri REALI personalizzati. Rispondi SOLO c
 
     const data = await response.json();
     const text = data.content?.[0]?.text || '';
-    const parsed = JSON.parse(text.trim());
+
+    // Estrae il JSON anche se Claude aggiunge testo attorno
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Nessun JSON trovato nella risposta.');
+    const parsed = JSON.parse(jsonMatch[0]);
 
     const enriched = await Promise.all(
       (parsed.recommendations || []).map(async (rec: any) => {
