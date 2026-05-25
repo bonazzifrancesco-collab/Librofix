@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const base64Data = base64Image.split(',')[1] || base64Image;
       
       response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-1.5-flash-002',
         contents: [
           { inlineData: { mimeType, data: base64Data } },
           { text: "Analizza la copertina o il retro di questo libro. Estrai Titolo, Autore, Genere, Pagine e una breve descrizione in italiano. Rispondi solo in formato JSON." }
