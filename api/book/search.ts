@@ -1,34 +1,38 @@
-import { GoogleGenAIServer } from '@google/generative-ai';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default async function handler(req: any, res: any) {
-  if (req.method !== 'POST') return res.status(405).end();
-
+async function fetchGoogleBooks(query: string, limit = 8) {
   try {
-    const { query } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY mancante' });
-
-    const ai = new GoogleGenAIServer({ apiKey });
-    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-    const prompt = `Cerca informazioni sul libro: "${query}". Trova titolo, autore, genere, anno, una breve trama in italiano e pagine.
-    Rispondi ESCLUSIVAMENTE in formato JSON (un array di oggetti) con questa struttura:
-    [
-      {
-        "title": "Titolo",
-        "author": "Autore",
-        "genre": "Genere",
-        "year": "Anno",
-        "description": "Trama breve",
-        "pages": 300
-      }
-    ]`;
-
-    const result = await model.generateContent(prompt);
-    const cleanJson = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    return res.status(200).json(JSON.parse(cleanJson));
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+    const response = await fetch(
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
+    );
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data.items) return [];
+    return data.items.map((item: any) => {
+      const info = item.volumeInfo || {};
+      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
+      let coverUrl = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '';
+      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
+      return {
+        title: info.title || 'Titolo Sconosciuto',
+        author: info.authors ? info.authors.join(', ') : 'Autore Sconosciuto',
+        genre: info.categories?.[0] || 'Generico',
+        pages: info.pageCount || 200,
+        description: info.description || 'Nessuna descrizione disponibile.',
+        ean: isbnObj ? isbnObj.identifier : '',
+        coverUrl,
+      };
+    });
+  } catch {
+    return [];
   }
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).end();
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: 'Query richiesta.' });
+  const books = await fetchGoogleBooks(query, 12);
+  res.json({ books });
 }
