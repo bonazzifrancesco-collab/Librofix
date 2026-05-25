@@ -1,7 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
-
-// Inizializzazione immediata e pulita dell'SDK
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+import { GoogleGenAIServer } from '@google/generative-ai';
 
 export default async function handler(req: any, res: any) {
   // Gestione del metodo corretto
@@ -11,61 +8,52 @@ export default async function handler(req: any, res: any) {
 
   try {
     const { preferences, readingHistory } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
 
-    if (!process.env.GEMINI_API_KEY) {
+    if (!apiKey) {
       return res.status(500).json({ error: 'GEMINI_API_KEY mancante su Vercel.' });
     }
 
+    // Usiamo il core stabile compatibile al 100% con Vercel Serverless
+    const ai = new GoogleGenAIServer({ apiKey });
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
     const prompt = `Sei un esperto bibliotecario. Analizza i gusti dell'utente e la sua cronologia e consiglia 5 libri perfetti.
     PREFERENZE: ${preferences || 'Nessuna'}
-    CRONOLOGIA: ${readingHistory ? JSON.stringify(readingHistory) : 'Nessuna'}`;
+    CRONOLOGIA: ${readingHistory ? JSON.stringify(readingHistory) : 'Nessuna'}
+    
+    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un oggetto con un array chiamato "recommendations") con questa esatta struttura, senza blocchi di codice markdown:
+    {
+      "recommendations": [
+        {
+          "title": "Titolo",
+          "author": "Autore",
+          "genre": "Genere",
+          "description": "Trama breve in italiano",
+          "matchPercentage": 95,
+          "reason": "Spiegazione breve",
+          "pages": 300
+        }
+      ]
+    }`;
 
-    // Chiamata diretta con lo schema di validazione nativo dell'SDK 1.29
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            recommendations: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  author: { type: Type.STRING },
-                  genre: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  matchPercentage: { type: Type.INTEGER },
-                  reason: { type: Type.STRING },
-                  pages: { type: Type.INTEGER },
-                },
-                required: ['title', 'author', 'genre', 'description', 'matchPercentage', 'reason'],
-              },
-            },
-          },
-          required: ['recommendations'],
-        },
-      },
-    });
-
-    const responseText = response.text;
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    
     if (!responseText) {
       return res.status(500).json({ error: 'Risposta vuota ricevuta da Gemini.' });
     }
 
-    const parsedData = JSON.parse(responseText.trim());
+    // Pulisce l'output da eventuali tag markdown ```json aggiunti dall'AI
+    const cleanJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(cleanJson);
 
-    // Integrazione super-leggera con Google Books per recuperare le copertine
+    // Integrazione con Google Books per recuperare le copertine
     const enrichedRecommendations = await Promise.all(
       (parsedData.recommendations || []).map(async (book: any) => {
         try {
           const searchQuery = encodeURIComponent(`${book.title} ${book.author}`);
-          const booksApiUrl = `https://www.googleapis.com/books/v1/volumes?q=${searchQuery}&maxResults=1`;
-          
-          const booksResponse = await fetch(booksApiUrl);
+          const booksResponse = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${searchQuery}&maxResults=1`);
           if (booksResponse.ok) {
             const booksData = await booksResponse.json();
             if (booksData.items && booksData.items.length > 0) {
