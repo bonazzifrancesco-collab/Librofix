@@ -32,11 +32,9 @@ async function fetchGoogleBooks(query: string, limit = 1) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end();
   const { ean } = req.body;
-  if (!ean) return res.status(400).json({ error: 'EAN o titolo mancante' });
-
-  const results = await fetchGoogleBooks(ean, 1);
-  if (results.length > 0) {
-    return res.json(results[0]);
-  }
-  res.status(404).json({ error: 'Libro non trovato' });
+  if (!ean) return res.status(400).json({ error: 'EAN richiesto.' });
+  const cleanEan = ean.replace(/[\s-]/g, '');
+  const results = await fetchGoogleBooks(`isbn:${cleanEan}`, 1);
+  if (results.length > 0) return res.json({ success: true, book: results[0] });
+  res.status(404).json({ error: 'Libro non trovato.' });
 }
