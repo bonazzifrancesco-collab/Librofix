@@ -41,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const base64Clean = image.replace(/^data:image\/\w+;base64,/, '');
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-002',
       contents: {
         parts: [
           { inlineData: { mimeType: 'image/jpeg', data: base64Clean } },
