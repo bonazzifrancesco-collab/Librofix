@@ -1,59 +1,34 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAIServer } from '@google/generative-ai';
 
-export const config = {
-  runtime: 'edge',
-};
-
-export default async function handler(req: Request) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
-  }
+export default async function handler(req: any, res: any) {
+  if (req.method !== 'POST') return res.status(405).end();
 
   try {
-    const { query } = await req.json();
-    if (!query) {
-      return new Response(JSON.stringify({ error: 'Query mancante' }), { status: 400 });
-    }
+    const { query } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY mancante' });
 
-    if (!process.env.GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Configurazione GEMINI_API_KEY mancante' }), { status: 500 });
-    }
+    const ai = new GoogleGenAIServer({ apiKey });
+    const model = ai.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    const prompt = `Cerca informazioni strutturate sul libro o sui libri che corrispondono a questa ricerca: "${query}".
-    Trova titolo, autore, genere, anno di pubblicazione originale, una breve trama in italiano e il numero di pagine approssimativo.
-    
-    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un array di oggetti) con questa esatta struttura:
+    const prompt = `Cerca informazioni sul libro: "${query}". Trova titolo, autore, genere, anno, una breve trama in italiano e pagine.
+    Rispondi ESCLUSIVAMENTE in formato JSON (un array di oggetti) con questa struttura:
     [
       {
-        "title": "Titolo del libro",
+        "title": "Titolo",
         "author": "Autore",
-        "genre": "Genere principale",
+        "genre": "Genere",
         "year": "Anno",
-        "description": "Breve trama in italiano (2-3 frasi).",
+        "description": "Trama breve",
         "pages": 300
       }
     ]`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
-      contents: prompt,
-    });
-
-    const text = response.text;
-    if (!text) throw new Error('Nessun dato dall\'AI');
-
-    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const books = JSON.parse(cleanJson);
-
-    return new Response(JSON.stringify(books), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (error: any) {
-    console.error('Search error:', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    const result = await model.generateContent(prompt);
+    const cleanJson = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    return res.status(200).json(JSON.parse(cleanJson));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 }
