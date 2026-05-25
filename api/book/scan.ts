@@ -1,59 +1,103 @@
-import { GoogleGenAI } from '@google/genai';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { GoogleGenAI, Type } from '@google/genai';
 
-export const config = {
-  runtime: 'edge',
-};
+function getGemini() {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY non configurata.');
+  return new GoogleGenAI({ apiKey: key });
+}
 
-export default async function handler(req: Request) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
-  }
-
+async function fetchGoogleBooks(query: string, limit = 1) {
   try {
-    const { scannedText } = await req.json();
-    if (!scannedText) {
-      return new Response(JSON.stringify({ error: 'Nessun testo scansionato fornito' }), { status: 400 });
+    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
+    const response = await fetch(
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
+    );
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!data.items) return [];
+    return data.items.map((item: any) => {
+      const info = item.volumeInfo || {};
+      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
+      let coverUrl = info.imageLinks?.thumbnail || '';
+      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
+      return { ean: isbnObj?.identifier || '', coverUrl };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).end();
+  
+  try {
+    const { base64Image, scannedText } = req.body;
+    const ai = getGemini();
+    
+    let response;
+
+    if (base64Image) {
+      const mimeType = base64Image.split(';')[0].split(':')[1] || 'image/jpeg';
+      const base64Data = base64Image.split(',')[1] || base64Image;
+      
+      response = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: [
+          { inlineData: { mimeType, data: base64Data } },
+          { text: "Analizza la copertina o il retro di questo libro. Estrai Titolo, Autore, Genere, Pagine e una breve descrizione in italiano. Rispondi solo in formato JSON." }
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              author: { type: Type.STRING },
+              genre: { type: Type.STRING },
+              pages: { type: Type.INTEGER },
+              description: { type: Type.STRING },
+              ean: { type: Type.STRING },
+            },
+            required: ['title', 'author', 'genre', 'pages'],
+          }
+        }
+      });
+    } else {
+      response = await ai.models.generateContent({
+        model: 'gemini-1.5-flash',
+        contents: `Analizza questo testo scansionato da un libro ed estrai i dettagli. TEXT: "${scannedText}"`,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              author: { type: Type.STRING },
+              genre: { type: Type.STRING },
+              pages: { type: Type.INTEGER },
+              description: { type: Type.STRING },
+              ean: { type: Type.STRING },
+            },
+            required: ['title', 'author', 'genre', 'pages'],
+          }
+        }
+      });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return new Response(JSON.stringify({ error: 'Configurazione GEMINI_API_KEY mancante' }), { status: 500 });
+    const parsed = JSON.parse(response.text?.trim() || '{}');
+
+    if (parsed.title && parsed.title !== 'Sconosciuto') {
+      const enrichment = await fetchGoogleBooks(`${parsed.title} ${parsed.author || ''}`, 1);
+      if (enrichment.length > 0) {
+        parsed.coverUrl = enrichment[0].coverUrl;
+        if (!parsed.ean && enrichment[0].ean) parsed.ean = enrichment[0].ean;
+      }
     }
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-    const prompt = `Analizza il seguente blocco di testo estratto dalla scansione o foto di un libro. Individua se contiene titolo, autore o codice ISBN e ricostruisci i dati del libro.
-    
-    TESTO SCANSIONATO:
-    "${scannedText}"
-    
-    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un singolo oggetto) con questa esatta struttura:
-    {
-      "title": "Titolo identificato",
-      "author": "Autore identificato",
-      "genre": "Genere stimato",
-      "year": "Anno",
-      "description": "Breve riassunto o nota del libro trovato.",
-      "pages": 0
-    }`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: prompt,
-    });
-
-    const text = response.text;
-    if (!text) throw new Error('Nessun dato estratto');
-
-    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const scannedBook = JSON.parse(cleanJson);
-
-    return new Response(JSON.stringify(scannedBook), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (error: any) {
-    console.error('Scan error:', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    res.json({ success: true, book: parsed });
+  } catch (err: any) {
+    console.error('Scan error:', err);
+    res.status(500).json({ error: 'Impossibile completare l\'analisi ottica dell\'immagine.' });
   }
 }
