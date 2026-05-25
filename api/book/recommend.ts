@@ -1,116 +1,61 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
-function getGemini() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY non configurata.');
-  return new GoogleGenAI({ apiKey: key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
-}
+export const config = {
+  runtime: 'edge',
+};
 
-async function fetchGoogleBooks(query: string, limit = 1) {
-  try {
-    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-    const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=${limit}${key}`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
-    if (!data.items) return [];
-    return data.items.map((item: any) => {
-      const info = item.volumeInfo || {};
-      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
-      let coverUrl = info.imageLinks?.thumbnail || '';
-      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-      return { ean: isbnObj?.identifier || '', coverUrl };
-    });
-  } catch {
-    return [];
+export default async function handler(req: Request) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405 });
   }
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return res.status(405).end();
-
-  const { books } = req.body;
-  if (!Array.isArray(books)) return res.status(400).json({ error: 'Elenco libri non valido.' });
 
   try {
-    const ai = getGemini();
+    const { preferences, readingHistory } = await req.json();
 
-    const bookSummary = books.length === 0
-      ? "L'utente non ha ancora aggiunto libri. Consiglia 4 capolavori moderni di generi vari ed entusiasmanti!"
-      : books.map((b: any) =>
-          `- "${b.title}" di ${b.author} (Genere: ${b.genre}, Stato: ${b.status === 'completed' ? 'Letto' : 'In lettura'}, Voto: ${b.rating ? `${b.rating}/10` : 'Nessuno'}, Recensione: "${b.review || 'Nessuna'}")`
-        ).join('\n');
+    if (!process.env.GEMINI_API_KEY) {
+      return new Response(JSON.stringify({ error: 'Configurazione GEMINI_API_KEY mancante su Vercel' }), { status: 500 });
+    }
 
-    const prompt = `
-Sei l'algoritmo di raccomandazione letteraria avanzato di "BookFlix" (un'app stile Netflix per i libri).
+    // Inizializzazione corretta con il nuovo SDK
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-Analizza i gusti letterari del lettore in base alla sua cronologia di lettura e recensioni:
+    const prompt = `Sei un esperto bibliotecario e consulente letterario. 
+    Analizza i seguenti gusti dell'utente e la sua cronologia di lettura per consigliargli 5 libri perfetti per lui.
+    
+    PREFERENZE UTENTE: ${preferences || 'Nessuna preferenza specifica indicata'}
+    CRONOLOGIA DI LETTURA: ${readingHistory ? JSON.stringify(readingHistory) : 'Nessun libro letto finora'}
+    
+    Restituisci la risposta ESCLUSIVAMENTE in formato JSON (un array di oggetti) con questa esatta struttura, senza alcun testo o blocco di codice markdown prima o dopo:
+    [
+      {
+        "title": "Titolo del libro",
+        "author": "Autore",
+        "reason": "Spiegazione personalizzata del perché gli piacerà questo libro (massimo 2 frasi)."
+      }
+    ]`;
 
-LIBRI DISPONIBILI:
-${bookSummary}
-
-Compito:
-1. Genera esattamente 4 suggerimenti di libri REALI altamente personalizzati per questo utente.
-2. Per ogni libro fornisci:
-   - Titolo e Autore
-   - Genere (es. Romanzo, Thriller, Saggistica ecc.)
-   - Descrizione accattivante che spieghi perché gli piacerà (stile raccomandazione Netflix)
-   - matchPercentage: percentuale fittizia di affinità tra 85 e 99
-   - reason: motivo dettagliato basato sui suoi gusti e recensioni
-   - pages: numero di pagine reale del libro
-
-Rispondi RIGOROSAMENTE in formato JSON in lingua ITALIANA.
-`;
-
+    // Chiamata standard del nuovo SDK con il modello corretto
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash-002',
+      model: 'gemini-1.5-flash',
       contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            recommendations: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  author: { type: Type.STRING },
-                  genre: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  matchPercentage: { type: Type.INTEGER },
-                  reason: { type: Type.STRING },
-                  pages: { type: Type.INTEGER },
-                },
-                required: ['title', 'author', 'genre', 'description', 'matchPercentage', 'reason'],
-              },
-            },
-          },
-          required: ['recommendations'],
-        },
-      },
     });
 
-    const parsed = JSON.parse(response.text?.trim() || '{"recommendations":[]}');
+    const text = response.text;
+    if (!text) {
+      throw new Error('Risposta vuota ricevuta dall\'AI');
+    }
 
-    const enriched = await Promise.all(
-      (parsed.recommendations || []).map(async (rec: any) => {
-        try {
-          const googleData = await fetchGoogleBooks(`${rec.title} ${rec.author}`, 1);
-          if (googleData.length > 0) {
-            return { ...rec, coverUrl: googleData[0].coverUrl, ean: googleData[0].ean || '' };
-          }
-        } catch {}
-        return { ...rec, coverUrl: '' };
-      })
-    );
+    // Pulisce l'output da eventuali blocchi di codice markdown ```json inviati dall'AI
+    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const recommendations = JSON.parse(cleanJson);
 
-    res.json({ recommendations: enriched });
-  } catch (err: any) {
-    console.error('Recommend error:', err);
-    res.status(500).json({ error: 'Errore durante la generazione dei suggerimenti AI.' });
+    return new Response(JSON.stringify(recommendations), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (error: any) {
+    console.error('Recommend error:', error);
+    return new Response(JSON.stringify({ error: 'Errore AI: ' + error.message }), { status: 500 });
   }
 }
