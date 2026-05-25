@@ -51,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     CRONOLOGIA: ${readingHistory ? JSON.stringify(readingHistory) : 'Nessuna'}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-1.5-flash-002',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
