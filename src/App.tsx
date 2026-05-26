@@ -7,7 +7,8 @@ import BookDetailsModal from './components/BookDetailsModal';
 import AuthErrorModal from './components/AuthErrorModal';
 import StatsDashboard from './components/StatsDashboard';
 import RecommendationsList from './components/RecommendationsList';
-import { Sparkles, BookOpen, Layers, TrendingUp, Camera, Plus, HelpCircle, Info } from 'lucide-react';
+import NewReleases from './components/NewReleases';
+import { Sparkles, BookOpen, TrendingUp, Camera, Plus, Flame } from 'lucide-react';
 
 // Firebase imports
 import { auth, db, loginWithGoogle, logoutUser, handleFirestoreError, OperationType } from './lib/firebase';
@@ -83,33 +84,33 @@ const DEFAULT_RECOMMENDATIONS: BookRecommendation[] = [
     title: "L'Ombra del Vento",
     author: "Carlos Ruiz Zafón",
     genre: "Giallo",
-    description: "Un'avventura avvolgente ambientata nella Barcellona del dopoguerra, tra labirinti letterari e segreti celati nel Cimitero dei Libri Dimenticati. Perfetto per chi ama il mistero, la suspense storica e lo stile gotico raffinato.",
+    description: "Un'avventura avvolgente ambientata nella Barcellona del dopoguerra, tra labirinti letterari e segreti celati nel Cimitero dei Libri Dimenticati.",
     matchPercentage: 98,
-    reason: "Dato che hai adorato l'intreccio investigativo medievale di 'Il Nome della Rosa' e apprezzi le atmosfere misteriose, sarai affascinato dai segreti gotici di Zafón.",
+    reason: "Dato che hai adorato l'intreccio investigativo medievale di 'Il Nome della Rosa', sarai affascinato dai segreti gotici di Zafón.",
     pages: 440
   },
   {
     title: "La Svastica sul Sole",
     author: "Philip K. Dick",
     genre: "Fantascienza",
-    description: "Un'ucronia disturbante in cui le potenze dell'Asse hanno vinto la Seconda Guerra Mondiale spartendosi gli Stati Uniti. Un capolavoro di paranoie sociologiche e universi alternativi.",
+    description: "Un'ucronia disturbante in cui le potenze dell'Asse hanno vinto la Seconda Guerra Mondiale spartendosi gli Stati Uniti.",
     matchPercentage: 94,
-    reason: "Basandoci sul tuo vivo interesse per le letture distopiche di '1984', questo romanzo offre una riflessione profonda sui regimi autoritari ed universi paralleli.",
+    reason: "Basandoci sul tuo interesse per le letture distopiche di '1984', questo romanzo offre una riflessione profonda sui regimi autoritari.",
     pages: 310
   },
   {
     title: "Fahrenheit 451",
     author: "Ray Bradbury",
     genre: "Fantascienza",
-    description: "Un futuro terrificante in cui i libri sono rigorosamente banditi e bruciati dai vigili del fuoco. Una lettera d'amore appassionata e viscerale verso il potere della letteratura e del libero pensiero umano.",
+    description: "Un futuro terrificante in cui i libri sono banditi e bruciati dai vigili del fuoco. Una lettera d'amore verso il potere della letteratura.",
     matchPercentage: 91,
-    reason: "Dato che segui romanzi dal forte sapore distopico, Fahrenheit 455 si allinea elegantemente ai tuoi gusti arricchendo la tua passione per il potere dei libri.",
+    reason: "Dato che segui romanzi dal forte sapore distopico, Fahrenheit 451 si allinea elegantemente ai tuoi gusti.",
     pages: 180
   }
 ];
 
 export default function App() {
-  // 1. Auth & Firebase state
+  // Auth & Firebase state
   const [user, setUser] = useState<User | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState<{ code: string; message: string; domain?: string } | null>(null);
@@ -119,32 +120,29 @@ export default function App() {
       setAuthError(null);
       await loginWithGoogle();
     } catch (error: any) {
-      console.error("Google authentication action trigger failed:", error);
       const code = error?.code || "unknown";
       const msg = error?.message || String(error);
       setAuthError({ code, message: msg, domain: window.location.hostname });
     }
   };
 
-  // 2. Main data trackers
+  // Main data
   const [books, setBooks] = useState<Book[]>([]);
-
   const [recommendations, setRecommendations] = useState<BookRecommendation[]>(() => {
     const saved = localStorage.getItem('bookflix_recommendations');
     return saved ? JSON.parse(saved) : DEFAULT_RECOMMENDATIONS;
   });
 
-  // Display Panel Tabs: 'shelf' | 'stats' | 'recommendations'
-  const [activeTab, setActiveTab] = useState<'shelf' | 'stats' | 'recommendations'>('shelf');
+  const [activeTab, setActiveTab] = useState<'shelf' | 'stats' | 'recommendations' | 'newreleases'>('shelf');
 
-  // Modals state structures
+  // Modals
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [isAddBookModalOpen, setIsAddBookModalOpen] = useState(false);
   const [addModalInitialStatus, setAddModalInitialStatus] = useState<'planning' | 'reading' | 'completed'>('planning');
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
   const [scannedBookData, setScannedBookData] = useState<any | null>(null);
 
-  // Sync Authentication state
+  // Sync auth
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -153,18 +151,16 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
-  // Sync state with Storage / Firestore
+  // Sync libri da Firestore o localStorage
   useEffect(() => {
     if (isLoadingAuth) return;
 
     if (!user) {
-      // Offline fallback / local storage for unauthenticated visitors
       const saved = localStorage.getItem('bookflix_books');
       setBooks(saved ? JSON.parse(saved) : SEED_BOOKS);
       return;
     }
 
-    // Authenticated Firestore sync listener
     const path = `users/${user.uid}/books`;
     const unsubFirestore = onSnapshot(collection(db, path), (snapshot) => {
       const dbBooks: Book[] = [];
@@ -190,8 +186,7 @@ export default function App() {
           spineStyle: data.spineStyle || "classic",
         });
       });
-      // Order books consistently (e.g., newest additions first)
-      setBooks(dbBooks.sort((a,b) => b.id.localeCompare(a.id)));
+      setBooks(dbBooks.sort((a, b) => b.id.localeCompare(a.id)));
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, path);
     });
@@ -199,20 +194,33 @@ export default function App() {
     return () => unsubFirestore();
   }, [user, isLoadingAuth]);
 
-  // Sync books state to LocalStorage as a backup (only for unauthenticated demo mode)
+  // Sync raccomandazioni da Firestore (se loggato)
+  useEffect(() => {
+    if (isLoadingAuth || !user) return;
+
+    const path = `users/${user.uid}/meta/recommendations`;
+    const unsubRec = onSnapshot(doc(db, path), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.recommendations?.length > 0) {
+          setRecommendations(data.recommendations);
+        }
+      }
+    });
+    return () => unsubRec();
+  }, [user, isLoadingAuth]);
+
+  // Backup localStorage per utenti non loggati
   useEffect(() => {
     if (!isLoadingAuth && !user) {
       localStorage.setItem('bookflix_books', JSON.stringify(books));
     }
   }, [books, user, isLoadingAuth]);
 
-  // Add customized book
+  // Aggiungi libro
   const handleAddBook = async (newBookData: Omit<Book, 'id'>) => {
     const bookId = `book-${Date.now()}`;
-    const newBook: Book = {
-      ...newBookData,
-      id: bookId,
-    };
+    const newBook: Book = { ...newBookData, id: bookId };
 
     if (!user) {
       setBooks((prev) => [newBook, ...prev]);
@@ -249,17 +257,14 @@ export default function App() {
       setIsAddBookModalOpen(false);
       setScannedBookData(null);
     } catch (error: any) {
-      console.error("Firestore create error caught:", error);
       const code = error?.code || "permission-denied";
       const message = error?.message || String(error);
       setAuthError({ code, message, domain: window.location.hostname });
-      try {
-        handleFirestoreError(error, OperationType.CREATE, `${path}/${bookId}`);
-      } catch (e) {}
+      try { handleFirestoreError(error, OperationType.CREATE, `${path}/${bookId}`); } catch (e) {}
     }
   };
 
-  // Update existing book
+  // Aggiorna libro
   const handleUpdateBook = async (updatedBook: Book) => {
     if (!user) {
       setBooks((prev) => prev.map((b) => (b.id === updatedBook.id ? updatedBook : b)));
@@ -294,17 +299,14 @@ export default function App() {
       await updateDoc(docRef, payload);
       setSelectedBook(null);
     } catch (error: any) {
-      console.error("Firestore update error caught:", error);
       const code = error?.code || "permission-denied";
       const message = error?.message || String(error);
       setAuthError({ code, message, domain: window.location.hostname });
-      try {
-        handleFirestoreError(error, OperationType.UPDATE, `${path}/${bookId}`);
-      } catch (e) {}
+      try { handleFirestoreError(error, OperationType.UPDATE, `${path}/${bookId}`); } catch (e) {}
     }
   };
 
-  // Delete book from catalog
+  // Elimina libro
   const handleDeleteBook = async (bookId: string) => {
     if (!user) {
       setBooks((prev) => prev.filter((b) => b.id !== bookId));
@@ -314,56 +316,59 @@ export default function App() {
 
     const path = `users/${user.uid}/books`;
     try {
-      const docRef = doc(db, path, bookId);
-      await deleteDoc(docRef);
+      await deleteDoc(doc(db, path, bookId));
       setSelectedBook(null);
     } catch (error: any) {
-      console.error("Firestore delete error caught:", error);
       const code = error?.code || "permission-denied";
       const message = error?.message || String(error);
       setAuthError({ code, message, domain: window.location.hostname });
-      try {
-        handleFirestoreError(error, OperationType.DELETE, `${path}/${bookId}`);
-      } catch (e) {}
+      try { handleFirestoreError(error, OperationType.DELETE, `${path}/${bookId}`); } catch (e) {}
     }
   };
 
-  // Web camera scanner success callback
+  // Scanner callback
   const handleScanSuccess = (bookData: any) => {
     setScannedBookData(bookData);
     setIsScannerModalOpen(false);
-    // Directly open form to let them adjust the scanned details
     setAddModalInitialStatus('reading');
     setIsAddBookModalOpen(true);
   };
 
-  // Submits library data to Gemini API backend to obtain recommended books
+  // Aggiorna consigli AI e salva su Firestore + localStorage
   const refreshRecommendations = async () => {
     try {
       const res = await fetch('/api/book/recommend', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ books }),
       });
 
-      if (!res.ok) {
-        throw new Error("Impossibile connettersi ai server AI.");
-      }
+      if (!res.ok) throw new Error("Impossibile connettersi ai server AI.");
 
       const data = await res.json();
       if (data.recommendations && data.recommendations.length > 0) {
         setRecommendations(data.recommendations);
         localStorage.setItem('bookflix_recommendations', JSON.stringify(data.recommendations));
+
+        // Salva su Firestore se loggato
+        if (user) {
+          try {
+            await setDoc(doc(db, `users/${user.uid}/meta/recommendations`), {
+              recommendations: data.recommendations,
+              updatedAt: serverTimestamp(),
+            });
+          } catch (e) {
+            console.warn('Firestore recommendations save failed:', e);
+          }
+        }
       }
     } catch (err: any) {
       console.error(err);
-      alert("Errore AI: Assicurati che la chiave GEMINI_API_KEY nei Secrets sia valida ed attiva per calcolare i consigli.");
+      alert("Errore AI: Assicurati che la chiave ANTHROPIC_API_KEY su Vercel sia valida.");
     }
   };
 
-  // Quick action: Adds a recommended book directly to their Planning shelf
+  // Aggiungi dai consigliati
   const handleAddFromRecommendation = (rec: BookRecommendation) => {
     const randomColor = ['#5c2020', '#1b4332', '#0d3b66', '#b18a28', '#4a306d', '#2a2a2e', '#7a3f1d'][Math.floor(Math.random() * 7)];
     const randomHeight = Math.floor(Math.random() * (172 - 132 + 1)) + 132;
@@ -384,22 +389,25 @@ export default function App() {
       spineStyle: randomStyle,
     };
 
-    setBooks((prev) => [newBook, ...prev]);
+    if (user) {
+      handleAddBook(newBook);
+    } else {
+      setBooks((prev) => [newBook, ...prev]);
+    }
   };
 
   const addedTitles = books.map((b) => b.title);
 
   return (
-    <div id="bookflix-root" className="min-h-screen bg-[#0A0A0B] text-slate-100 font-sans selection:bg-red-650 selection:text-white pb-24">
-      
-      {/* 1. CINEMATIC BACKGROUND GLOW */}
-      <div className="absolute top-0 inset-x-0 h-[500px] bg-gradient-to-b from-red-950/15 via-[#0A0A0B]/5 to-transparent pointer-events-none z-0"></div>
+    <div className="min-h-screen bg-[#0A0A0B] text-slate-100 font-sans pb-24">
 
-      {/* 2. HEADER BAR (Netflix-style brand) */}
+      {/* Background glow */}
+      <div className="absolute top-0 inset-x-0 h-[500px] bg-gradient-to-b from-red-950/15 via-[#0A0A0B]/5 to-transparent pointer-events-none z-0" />
+
+      {/* Header */}
       <header className="relative z-10 border-b border-white/10 bg-[#0F0F12] sticky top-0 px-4 py-0 h-20 flex items-center md:px-10">
         <div className="w-full max-w-7xl mx-auto flex items-center justify-between">
-          
-          {/* Brand logo label */}
+
           <div className="flex items-center gap-8">
             <span className="text-2xl font-bold text-red-600 tracking-tighter uppercase font-sans animate-pulse">
               LIBROFLIX
@@ -409,10 +417,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Core Action triggers */}
           <div className="flex items-center gap-2 md:gap-4">
-            
-            {/* User Logged in state / login buttons */}
             {isLoadingAuth ? (
               <div className="text-xs text-zinc-500 animate-pulse font-mono py-1">Caricamento...</div>
             ) : user ? (
@@ -426,9 +431,9 @@ export default function App() {
                   </span>
                 </div>
                 {user.photoURL ? (
-                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-red-650/40 shadow shadow-red-500/10" referrerPolicy="no-referrer" />
+                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-red-600/40" referrerPolicy="no-referrer" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-red-800 text-white font-black text-xs flex items-center justify-center border border-red-650">
+                  <div className="w-8 h-8 rounded-full bg-red-800 text-white font-black text-xs flex items-center justify-center">
                     {user.displayName ? user.displayName[0].toUpperCase() : "U"}
                   </div>
                 )}
@@ -442,15 +447,13 @@ export default function App() {
             ) : (
               <button
                 onClick={handleSignIn}
-                className="bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-300 text-[11px] font-bold uppercase tracking-wider py-1.5 px-3 rounded-full flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
+                className="bg-amber-600/10 hover:bg-amber-600/20 border border-amber-500/20 text-amber-300 text-[11px] font-bold uppercase tracking-wider py-1.5 px-3 rounded-full flex items-center gap-1.5 transition active:scale-95"
               >
-                <span>Accedi con Google</span>
+                Accedi con Google
               </button>
             )}
 
-            {/* Camera Scanner Trigger */}
             <button
-              id="header-scanner-btn"
               onClick={() => setIsScannerModalOpen(true)}
               className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 py-1.5 px-3 md:py-2 md:px-4 rounded-full text-xs font-bold uppercase tracking-wider text-red-500 hover:text-white flex items-center gap-2 transition active:scale-95"
             >
@@ -458,53 +461,46 @@ export default function App() {
               <span className="hidden md:inline">Scansiona Libro</span>
             </button>
 
-            {/* Quick manual Add Trigger */}
             <button
-              id="header-add-btn"
               onClick={() => {
                 setScannedBookData(null);
                 setAddModalInitialStatus('planning');
                 setIsAddBookModalOpen(true);
               }}
-              className="bg-red-650 hover:bg-red-700 hover:shadow-lg hover:shadow-red-900/20 py-1.5 px-3 md:py-2 md:px-5 rounded-full text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5 transition active:scale-95"
+              className="bg-red-600 hover:bg-red-700 py-1.5 px-3 md:py-2 md:px-5 rounded-full text-xs font-bold uppercase tracking-wider text-white flex items-center gap-1.5 transition active:scale-95"
             >
               <Plus className="w-4 h-4" />
               <span>Aggiungi</span>
             </button>
           </div>
-
         </div>
       </header>
 
-      {/* 3. MAIN APP PANEL VIEW */}
+      {/* Main */}
       <main className="relative z-10 max-w-7xl mx-auto px-4 md:px-8 pt-8 space-y-8">
-        
-        {/* Welcome message banner and metadata panel info box */}
+
+        {/* Banner */}
         <div className="bg-gradient-to-r from-red-950/20 to-zinc-900/40 border border-red-950/10 p-5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl md:text-2xl font-black tracking-tight font-serif text-amber-100 flex items-center gap-2 flex-wrap">
               <span>Il tuo scaffale letterario Netflix</span>
               {user && (
-                <span className="text-[9px] uppercase font-mono bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold self-center shadow-sm">
+                <span className="text-[9px] uppercase font-mono bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-bold self-center">
                   ☁️ Firebase Cloud ON
                 </span>
               )}
             </h1>
             <p className="text-xs text-zinc-400 leading-relaxed max-w-2xl">
-              Fai fare un salto di qualità alla tua libreria domestica! Inquadra i libri con la fotocamera per catalogarli con l'AI o aggiungili cercando online. Recensisci le letture e ricevi raccomandazioni letterarie intelligenti basate sui tuoi voti.
+              Inquadra i libri con la fotocamera per catalogarli con l'AI o aggiungili cercando online. Recensisci le letture e ricevi raccomandazioni letterarie intelligenti basate sui tuoi voti.
             </p>
           </div>
-
-          {/* Quick instructions indicator tooltip */}
-          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-950/50 border border-zinc-900 shrink-0 text-left text-xs text-zinc-400 font-medium max-w-xs transition duration-300">
+          <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-zinc-950/50 border border-zinc-900 shrink-0 text-left text-xs text-zinc-400 font-medium max-w-xs">
             {user ? (
               <div className="flex items-start gap-2">
                 <span className="text-lg">☁️</span>
                 <div>
                   <p className="font-bold text-slate-200 text-xs">Database Firebase Attivo</p>
-                  <p className="text-[10px] text-zinc-400 leading-normal mt-0.5">
-                    Tutti i tuoi scaffali e recensioni sono salvati sul cloud di Google.
-                  </p>
+                  <p className="text-[10px] text-zinc-400 leading-normal mt-0.5">Tutti i tuoi scaffali e recensioni sono salvati sul cloud.</p>
                 </div>
               </div>
             ) : (
@@ -513,7 +509,7 @@ export default function App() {
                 <div>
                   <p className="font-bold text-amber-400 text-xs">Salvataggio Locale</p>
                   <p className="text-[10px] text-zinc-400 leading-normal mt-0.5">
-                    In modalità Demo locale. <u>Accedi con Google</u> per attivare il database Firebase!
+                    In modalità Demo. <u>Accedi con Google</u> per attivare Firebase!
                   </p>
                 </div>
               </div>
@@ -521,8 +517,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Navigation Selector pills (Shelf, Recommendations, Statistics) */}
-        <div id="view-tabs" className="flex border-b border-white/10 gap-1 overflow-x-auto pb-px select-none">
+        {/* Tab navigation */}
+        <div className="flex border-b border-white/10 gap-1 overflow-x-auto pb-px select-none">
           <button
             onClick={() => setActiveTab('shelf')}
             className={`py-3 px-5 text-sm uppercase tracking-wider font-bold transition flex items-center gap-2.5 border-b-2 shrink-0 ${
@@ -548,6 +544,18 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setActiveTab('newreleases')}
+            className={`py-3 px-5 text-sm uppercase tracking-wider font-bold transition flex items-center gap-2.5 border-b-2 shrink-0 ${
+              activeTab === 'newreleases'
+                ? 'border-red-600 text-white bg-gradient-to-t from-red-950/20 to-transparent'
+                : 'border-transparent text-slate-400 hover:text-white'
+            }`}
+          >
+            <Flame className="w-4 h-4" />
+            Novità per Te
+          </button>
+
+          <button
             onClick={() => setActiveTab('stats')}
             className={`py-3 px-5 text-sm uppercase tracking-wider font-bold transition flex items-center gap-2.5 border-b-2 shrink-0 ${
               activeTab === 'stats'
@@ -560,9 +568,8 @@ export default function App() {
           </button>
         </div>
 
-        {/* Switch tab dynamic panel contents rendering */}
-        <div id="main-panel-view" className="transition-all duration-300">
-          
+        {/* Pannelli */}
+        <div className="transition-all duration-300">
           {activeTab === 'shelf' && (
             <BookShelf
               books={books}
@@ -589,13 +596,14 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'newreleases' && (
+            <NewReleases books={books} />
+          )}
         </div>
 
       </main>
 
-      {/* MODALS HOOKING WRAPPING LAYER */}
-
-      {/* 4. CAMERA OPTICAL AI SCANNER MODAL */}
+      {/* Modals */}
       {isScannerModalOpen && (
         <ScannerModal
           onClose={() => setIsScannerModalOpen(false)}
@@ -603,7 +611,6 @@ export default function App() {
         />
       )}
 
-      {/* 5. ADD / CREATE BOOK DETAILS MODAL CARD */}
       {isAddBookModalOpen && (
         <AddBookModal
           initialStatus={addModalInitialStatus}
@@ -616,7 +623,6 @@ export default function App() {
         />
       )}
 
-      {/* 6. VIEW / EDIT EXTENDED BOOK SPECS DETAILS AND REVIEW MODAL */}
       {selectedBook && (
         <BookDetailsModal
           book={selectedBook}
@@ -626,7 +632,6 @@ export default function App() {
         />
       )}
 
-      {/* 7. DIAGNOSTIC AUTH ERROR TROUBLESHOOTER MODAL */}
       {authError && (
         <AuthErrorModal
           error={authError}
@@ -634,11 +639,11 @@ export default function App() {
         />
       )}
 
-      {/* Bottom Status Bar (AI Suggestion Tip) to match Elegant Dark design */}
+      {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 h-12 bg-red-600/10 border-t border-red-600/20 flex items-center px-4 md:px-10 gap-3 z-40 backdrop-blur-sm">
         <div className="bg-red-600 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-widest text-white shrink-0">AI Suggest</div>
         <p className="text-xs text-slate-300 italic truncate">
-          {books.length > 0 
+          {books.length > 0
             ? `"Visto che apprezzi '${books[Math.floor(books.length / 2) % books.length].title}', prova a calcolare nuovi consigli personalizzati nel tab Consigliati AI!"`
             : `"Aggiungi o scansiona dei libri per sbloccare la tua personale videoteca letteraria su Libroflix!"`
           }
