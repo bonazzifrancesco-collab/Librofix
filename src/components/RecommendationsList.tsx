@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Book, BookRecommendation } from '../types';
-import { Sparkles, RefreshCw, Plus, Check, Loader, ThumbsUp, X, BookOpen } from 'lucide-react';
+import { Sparkles, RefreshCw, Plus, Check, Loader, ThumbsUp, X, BookOpen, ShoppingCart, ExternalLink } from 'lucide-react';
 
 interface RecommendationsListProps {
   books: Book[];
@@ -8,6 +8,16 @@ interface RecommendationsListProps {
   onRefreshRecommendations: () => Promise<void>;
   onAddFromRecommendation: (rec: BookRecommendation) => void;
   addedBookTitles: string[];
+}
+
+interface BookDetail {
+  description: string;
+  googleLink: string;
+  amazonLink: string;
+  ibsLink: string;
+  publishedDate: string;
+  publisher: string;
+  loading: boolean;
 }
 
 export default function RecommendationsList({
@@ -20,13 +30,13 @@ export default function RecommendationsList({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [promptMsg, setPromptMsg] = useState('');
   const [selectedRec, setSelectedRec] = useState<BookRecommendation | null>(null);
+  const [bookDetail, setBookDetail] = useState<BookDetail | null>(null);
 
   const loadingQuotes = [
     "Claude sta studiando lo stile dei tuoi autori preferiti...",
     "Analisi dei tuoi voti e recensioni in corso...",
-    "Confrontando i tuoi record con milioni di capolavori...",
-    "Scoprendo gemme letterarie segrete che potresti amare...",
-    "Unendo i fili narrativi della tua libreria...",
+    "Confrontando i tuoi gusti con migliaia di capolavori...",
+    "Scoprendo gemme letterarie che potresti amare...",
     "Creando un bouquet di romanzi su misura per te...",
   ];
 
@@ -46,6 +56,61 @@ export default function RecommendationsList({
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const openDetail = async (rec: BookRecommendation) => {
+    setSelectedRec(rec);
+    setBookDetail({ description: '', googleLink: '', amazonLink: '', ibsLink: '', publishedDate: '', publisher: '', loading: true });
+
+    try {
+      const key = '';
+      const query = encodeURIComponent(`${rec.title} ${rec.author}`);
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1`);
+      const data = await res.json();
+
+      if (data.items?.[0]) {
+        const info = data.items[0].volumeInfo;
+        const titleSlug = encodeURIComponent(rec.title);
+        const authorSlug = encodeURIComponent(rec.author);
+
+        setBookDetail({
+          description: info.description || rec.description || 'Nessuna trama disponibile.',
+          googleLink: info.infoLink || `https://books.google.com/books?q=${query}`,
+          amazonLink: `https://www.amazon.it/s?k=${titleSlug}+${authorSlug}`,
+          ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${titleSlug}+${authorSlug}`,
+          publishedDate: info.publishedDate || '',
+          publisher: info.publisher || '',
+          loading: false,
+        });
+      } else {
+        const titleSlug = encodeURIComponent(rec.title);
+        const authorSlug = encodeURIComponent(rec.author);
+        setBookDetail({
+          description: rec.description || 'Nessuna trama disponibile.',
+          googleLink: `https://books.google.com/books?q=${query}`,
+          amazonLink: `https://www.amazon.it/s?k=${titleSlug}+${authorSlug}`,
+          ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${titleSlug}+${authorSlug}`,
+          publishedDate: '',
+          publisher: '',
+          loading: false,
+        });
+      }
+    } catch {
+      setBookDetail({
+        description: rec.description || 'Nessuna trama disponibile.',
+        googleLink: '',
+        amazonLink: `https://www.amazon.it/s?k=${encodeURIComponent(rec.title)}`,
+        ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${encodeURIComponent(rec.title)}`,
+        publishedDate: '',
+        publisher: '',
+        loading: false,
+      });
+    }
+  };
+
+  const closeDetail = () => {
+    setSelectedRec(null);
+    setBookDetail(null);
   };
 
   const cleanTitle = (t: string) => t.trim().toLowerCase();
@@ -103,17 +168,15 @@ export default function RecommendationsList({
             return (
               <div
                 key={idx}
-                onClick={() => setSelectedRec(rec)}
-                className="group bg-zinc-900/40 border border-zinc-900 rounded-xl overflow-hidden shadow-md flex flex-col h-[400px] hover:scale-[1.03] hover:shadow-xl hover:shadow-black/60 transition duration-300 relative cursor-pointer"
+                onClick={() => openDetail(rec)}
+                className="group bg-zinc-900/40 border border-zinc-900 rounded-xl overflow-hidden shadow-md flex flex-col h-[400px] hover:scale-[1.03] hover:shadow-xl hover:shadow-black/60 transition duration-300 cursor-pointer"
               >
-                {/* Header card */}
+                {/* Card header */}
                 <div className="h-32 bg-gradient-to-br from-zinc-850 via-zinc-900 to-black relative p-4 flex items-end justify-between border-b border-zinc-800">
                   <div className="absolute top-3 left-3 bg-green-500/10 border border-green-500/20 py-0.5 px-2 rounded text-[10px] font-black tracking-wider text-green-400">
                     {rec.matchPercentage}% MATCH
                   </div>
-                  {rec.pages && (
-                    <div className="absolute top-3 right-3 text-zinc-500 text-[9px] font-bold font-mono">{rec.pages} PAG.</div>
-                  )}
+                  {rec.pages && <div className="absolute top-3 right-3 text-zinc-500 text-[9px] font-bold font-mono">{rec.pages} PAG.</div>}
                   <div className="flex-1 min-w-0 pr-12">
                     <span className="text-[9px] px-1.5 py-0.5 bg-red-600 text-white rounded font-bold uppercase tracking-widest inline-block mb-1.5">{rec.genre}</span>
                     <h3 className="text-sm font-black text-white truncate font-serif">{rec.title}</h3>
@@ -124,23 +187,23 @@ export default function RecommendationsList({
                       <img referrerPolicy="no-referrer" src={rec.coverUrl} alt={rec.title} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full p-1.5 flex flex-col justify-between bg-amber-800">
-                        <div className="text-[5px] uppercase tracking-wide opacity-70 truncate">{rec.genre}</div>
+                        <div className="text-[5px] uppercase opacity-70 truncate">{rec.genre}</div>
                         <div className="text-[7px] font-bold font-serif leading-tight line-clamp-3">{rec.title}</div>
-                        <div className="text-[5px] text-amber-200 truncate">AI</div>
+                        <div className="text-[5px] text-amber-200">AI</div>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Body */}
+                {/* Card body */}
                 <div className="p-4 flex-1 flex flex-col justify-between bg-zinc-950/50">
                   <div className="space-y-3 flex-1 overflow-hidden">
                     <div className="bg-zinc-900/80 border-l-2 border-amber-500 rounded p-2 text-[10px] text-zinc-300 leading-normal italic flex items-start gap-1">
                       <ThumbsUp className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
-                      <div><span className="font-bold text-amber-200">Perché consigliato: </span>{rec.reason}</div>
+                      <div><span className="font-bold text-amber-200 not-italic">Perché consigliato: </span>{rec.reason}</div>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed line-clamp-3">{rec.description}</p>
-                    <p className="text-[9px] text-zinc-600 italic">Clicca per vedere la trama completa</p>
+                    <p className="text-[9px] text-zinc-600 italic">↗ Clicca per trama completa e prezzi</p>
                   </div>
                   <div className="mt-4 pt-3 border-t border-zinc-900 shrink-0" onClick={e => e.stopPropagation()}>
                     {alreadyInLibrary ? (
@@ -163,12 +226,13 @@ export default function RecommendationsList({
         </div>
       )}
 
-      {/* Modal dettaglio consiglio */}
+      {/* Modal dettaglio */}
       {selectedRec && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
-            {/* Header modal */}
-            <div className="relative">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+
+            {/* Header modal con copertina */}
+            <div className="relative shrink-0">
               {selectedRec.coverUrl ? (
                 <div className="h-48 overflow-hidden relative">
                   <img referrerPolicy="no-referrer" src={selectedRec.coverUrl} alt={selectedRec.title} className="w-full h-full object-cover opacity-40" />
@@ -177,45 +241,99 @@ export default function RecommendationsList({
               ) : (
                 <div className="h-24 bg-gradient-to-br from-red-950/40 to-zinc-900" />
               )}
-              <div className="absolute top-3 right-3">
-                <button onClick={() => setSelectedRec(null)} className="bg-black/60 hover:bg-black text-white p-1.5 rounded-full transition">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+              <button onClick={closeDetail} className="absolute top-3 right-3 bg-black/60 hover:bg-black text-white p-1.5 rounded-full transition">
+                <X className="w-4 h-4" />
+              </button>
               <div className="absolute bottom-0 left-0 right-0 p-5">
-                <span className="text-[9px] px-2 py-0.5 bg-red-600 text-white rounded font-bold uppercase tracking-widest">{selectedRec.genre}</span>
-                <h2 className="text-xl font-black text-white font-serif mt-1">{selectedRec.title}</h2>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[9px] px-2 py-0.5 bg-red-600 text-white rounded font-bold uppercase tracking-widest">{selectedRec.genre}</span>
+                  <span className="bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-black px-2 py-0.5 rounded-full">{selectedRec.matchPercentage}% MATCH</span>
+                  {selectedRec.pages && <span className="text-zinc-500 text-[10px]">{selectedRec.pages} pag.</span>}
+                </div>
+                <h2 className="text-xl font-black text-white font-serif">{selectedRec.title}</h2>
                 <p className="text-sm text-zinc-400">di {selectedRec.author}</p>
+                {bookDetail?.publishedDate && <p className="text-[10px] text-zinc-500 mt-0.5">{bookDetail.publisher} · {bookDetail.publishedDate.slice(0, 4)}</p>}
               </div>
             </div>
 
-            {/* Body modal */}
-            <div className="p-5 space-y-4 max-h-80 overflow-y-auto">
-              <div className="flex items-center gap-3">
-                <span className="bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-black px-2.5 py-1 rounded-full">{selectedRec.matchPercentage}% MATCH</span>
-                {selectedRec.pages && <span className="text-zinc-500 text-xs">{selectedRec.pages} pagine</span>}
-              </div>
+            {/* Body modal scrollabile */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
 
+              {/* Perché consigliato */}
               <div className="bg-zinc-900/80 border-l-2 border-amber-500 rounded p-3 text-xs text-zinc-300 leading-relaxed italic">
                 <span className="font-bold text-amber-200 not-italic">Perché ti piacerà: </span>{selectedRec.reason}
               </div>
 
+              {/* Trama */}
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2 flex items-center gap-1.5">
                   <BookOpen className="w-3.5 h-3.5" /> Trama
                 </h4>
-                <p className="text-sm text-zinc-300 leading-relaxed">{selectedRec.description}</p>
+                {bookDetail?.loading ? (
+                  <div className="flex items-center gap-2 text-zinc-500 text-xs">
+                    <Loader className="w-4 h-4 animate-spin" /> Caricamento trama da Google Books...
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-300 leading-relaxed">{bookDetail?.description || selectedRec.description}</p>
+                )}
               </div>
+
+              {/* Link acquisto */}
+              {!bookDetail?.loading && (
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2 flex items-center gap-1.5">
+                    <ShoppingCart className="w-3.5 h-3.5" /> Dove Acquistare
+                  </h4>
+                  <div className="grid grid-cols-3 gap-2">
+                    {bookDetail?.amazonLink && (
+                      
+                        href={bookDetail.amazonLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-lg p-2.5 transition text-center"
+                      >
+                        <span className="text-lg">📦</span>
+                        <span className="text-[10px] font-bold text-amber-300">Amazon</span>
+                        <ExternalLink className="w-3 h-3 text-amber-500" />
+                      </a>
+                    )}
+                    {bookDetail?.ibsLink && (
+                      
+                        href={bookDetail.ibsLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center gap-1 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg p-2.5 transition text-center"
+                      >
+                        <span className="text-lg">📚</span>
+                        <span className="text-[10px] font-bold text-blue-300">IBS</span>
+                        <ExternalLink className="w-3 h-3 text-blue-500" />
+                      </a>
+                    )}
+                    {bookDetail?.googleLink && (
+                      
+                        href={bookDetail.googleLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex flex-col items-center gap-1 bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700 rounded-lg p-2.5 transition text-center"
+                      >
+                        <span className="text-lg">🔍</span>
+                        <span className="text-[10px] font-bold text-zinc-300">Google Books</span>
+                        <ExternalLink className="w-3 h-3 text-zinc-500" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Footer modal */}
-            <div className="p-4 border-t border-zinc-800 flex gap-3">
-              <button onClick={() => setSelectedRec(null)} className="flex-1 text-xs font-bold uppercase text-zinc-400 hover:text-white py-2.5 px-4 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 transition">
+            <div className="p-4 border-t border-zinc-800 flex gap-3 shrink-0">
+              <button onClick={closeDetail} className="flex-1 text-xs font-bold uppercase text-zinc-400 hover:text-white py-2.5 px-4 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 transition">
                 Chiudi
               </button>
               {!addedBookTitles.some(t => cleanTitle(t) === cleanTitle(selectedRec.title)) && (
                 <button
-                  onClick={() => { onAddFromRecommendation(selectedRec); setSelectedRec(null); }}
+                  onClick={() => { onAddFromRecommendation(selectedRec); closeDetail(); }}
                   className="flex-1 text-xs font-bold uppercase text-white py-2.5 px-4 rounded-lg bg-red-600 hover:bg-red-700 transition flex items-center justify-center gap-2"
                 >
                   <Plus className="w-3.5 h-3.5" /> Aggiungi ai Desiderati
