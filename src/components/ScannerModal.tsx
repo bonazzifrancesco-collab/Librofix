@@ -9,11 +9,10 @@ interface ScannerModalProps {
 export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  
-  const [stream, setStream] = useState<MediaStream | null>(null);
+
   const streamRef = useRef<MediaStream | null>(null);
   const activeRequestId = useRef<number>(0);
-  
+
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraLoading, setIsCameraLoading] = useState(false);
@@ -22,12 +21,12 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
   const [isDragActive, setIsDragActive] = useState(false);
 
   const thoughts = [
-    "Gemini sta ispezionando il codice a barre...",
-    "Ricerca dei dettagli dell'opera in corso...",
-    "OCR della copertina... Sto leggendo i caratteri!",
-    "Consultando la biblioteca virtuale di Alessandria...",
-    "Quasi fatto! Ottimizzazione dati in italiano...",
-    "Catalogazione dell'opera e calcolo del genere..."
+    "Analisi del codice a barre in corso...",
+    "Ricerca dei dettagli dell'opera...",
+    "OCR della copertina in corso...",
+    "Consultando la biblioteca virtuale...",
+    "Ottimizzazione dati in italiano...",
+    "Catalogazione e calcolo del genere...",
   ];
 
   useEffect(() => {
@@ -52,10 +51,9 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
 
     try {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
-      setStream(null);
 
       let mediaStream: MediaStream;
       try {
@@ -63,13 +61,13 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
           video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
-      } catch (firstErr) {
+      } catch {
         try {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment' },
             audio: false,
           });
-        } catch (secondErr) {
+        } catch {
           mediaStream = await navigator.mediaDevices.getUserMedia({
             video: true,
             audio: false,
@@ -78,16 +76,17 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
       }
 
       if (reqId !== activeRequestId.current) {
-        mediaStream.getTracks().forEach((track) => track.stop());
+        mediaStream.getTracks().forEach((t) => t.stop());
         return;
       }
 
       streamRef.current = mediaStream;
-      setStream(mediaStream);
+
+      // Prima setCameraActive per rendere il tag <video> nel DOM
       setCameraActive(true);
 
-      // Aspetta che React renderizzi il tag <video> nel DOM
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Aspetta che React renderizzi il <video>
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -101,10 +100,9 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
 
     } catch (err: any) {
       if (reqId !== activeRequestId.current) return;
-      console.error("[Camera] All attempts failed:", err);
       setError(
         window.self !== window.top
-          ? "Impossibile avviare la fotocamera dentro l'iframe di anteprima."
+          ? "Fotocamera non disponibile nell'anteprima iframe."
           : "Impossibile avviare la fotocamera. Verifica i permessi nel browser."
       );
     } finally {
@@ -119,7 +117,7 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
     return () => {
       activeRequestId.current = 999999;
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
     };
@@ -127,16 +125,14 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
 
   const stopCamera = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    setStream(null);
     setCameraActive(false);
   };
 
   const handleCapture = async () => {
     if (!videoRef.current || !canvasRef.current) return;
-
     try {
       setIsLoading(true);
       const video = videoRef.current;
@@ -158,14 +154,11 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
       });
 
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Scansione fallita.");
-      }
+      if (!res.ok || !data.success) throw new Error(data.error || 'Scansione fallita.');
 
       onScanSuccess(data.book);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Errore sconosciuto durante la scansione.");
+      setError(err.message || 'Errore durante la scansione.');
       startCamera();
     } finally {
       setIsLoading(false);
@@ -173,63 +166,46 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
   };
 
   const processImageFile = async (file: File) => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64Image = reader.result as string;
-        try {
-          stopCamera();
-          const res = await fetch('/api/book/scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64Image }),
-          });
-          const data = await res.json();
-          if (!res.ok || !data.success) {
-            throw new Error(data.error || "Lettura file fallita.");
-          }
-          onScanSuccess(data.book);
-        } catch (err: any) {
-          setError(err.message || "Errore d'analisi sul file caricato.");
-          startCamera();
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setError("Impossibile caricare il file immagine.");
-      setIsLoading(false);
-    }
+    setIsLoading(true);
+    setError(null);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Image = reader.result as string;
+      try {
+        stopCamera();
+        const res = await fetch('/api/book/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Image }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Lettura file fallita.');
+        onScanSuccess(data.book);
+      } catch (err: any) {
+        setError(err.message || "Errore d'analisi sul file.");
+        startCamera();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      processImageFile(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) processImageFile(e.target.files[0]);
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragActive(true);
-  };
-
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setIsDragActive(true); };
   const handleDragLeave = () => setIsDragActive(false);
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processImageFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) processImageFile(e.dataTransfer.files[0]);
   };
 
   return (
     <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-50 overflow-y-auto backdrop-blur-md">
-      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl relative">
+      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl">
 
         {/* Header */}
         <div className="p-5 flex justify-between items-center bg-zinc-900 border-b border-zinc-800">
@@ -237,18 +213,15 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
             <Camera className="text-red-500 w-5 h-5 animate-pulse" />
             <h3 className="text-lg font-bold text-white uppercase tracking-wider">AI Scanner di Libri</h3>
           </div>
-          <button
-            onClick={onClose}
-            className="text-zinc-400 hover:text-white transition p-1.5 rounded-full hover:bg-zinc-800"
-          >
+          <button onClick={onClose} className="text-zinc-400 hover:text-white transition p-1.5 rounded-full hover:bg-zinc-800">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
         <div className="p-6 space-y-6">
-
           <div className="relative">
+
             {isLoading ? (
               <div className="w-full aspect-video rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col items-center justify-center p-6 space-y-4 text-center">
                 <div className="relative">
@@ -256,8 +229,8 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                   <Camera className="w-5 h-5 text-amber-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-bounce" />
                 </div>
                 <div className="space-y-1 max-w-xs">
-                  <h4 className="text-sm font-bold text-white uppercase tracking-wider">Analisi con Gemini AI...</h4>
-                  <p className="text-[11px] text-zinc-400 leading-relaxed font-mono animate-pulse">{loadingMessage}</p>
+                  <h4 className="text-sm font-bold text-white uppercase tracking-wider">Analisi AI in corso...</h4>
+                  <p className="text-[11px] text-zinc-400 font-mono animate-pulse">{loadingMessage}</p>
                 </div>
               </div>
 
@@ -270,10 +243,8 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                   muted
                   className="w-full h-full object-cover"
                 />
-
-                {/* Laser line */}
+                {/* Laser */}
                 <div className="absolute inset-x-0 h-0.5 bg-red-500 opacity-70 shadow-[0_0_12px_rgba(239,68,68,0.8)] animate-bounce top-[10%]" />
-
                 {/* Target overlay */}
                 <div className="absolute inset-0 flex items-center justify-center p-4">
                   <div className="w-[80%] h-[70%] border-2 border-dashed border-white/50 rounded-lg relative pointer-events-none">
@@ -281,17 +252,16 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                     <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-red-500" />
                     <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-red-500" />
                     <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-red-500" />
-                    <div className="absolute inset-x-0 bottom-4 text-center text-[10px] text-white/80 bg-black/60 py-1 px-3 mx-10 rounded-full select-none font-mono">
+                    <div className="absolute inset-x-0 bottom-4 text-center text-[10px] text-white/80 bg-black/60 py-1 px-3 mx-10 rounded-full font-mono">
                       Inquadra Codice EAN o Copertina
                     </div>
                   </div>
                 </div>
-
                 {/* Capture button */}
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center">
                   <button
                     onClick={handleCapture}
-                    className="bg-red-600 hover:bg-red-700 active:scale-95 text-white py-2 px-6 rounded-full font-bold text-xs uppercase tracking-widest shadow-lg shadow-red-900/40 flex items-center gap-2 transition"
+                    className="bg-red-600 hover:bg-red-700 active:scale-95 text-white py-2 px-6 rounded-full font-bold text-xs uppercase tracking-widest shadow-lg flex items-center gap-2 transition"
                   >
                     <Camera className="w-4 h-4" /> Scansiona Ora
                   </button>
@@ -301,21 +271,16 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
             ) : isCameraLoading ? (
               <div className="w-full aspect-video rounded-xl bg-zinc-900/40 border border-zinc-800 flex flex-col items-center justify-center p-6 text-center">
                 <Loader className="w-8 h-8 text-red-500 animate-spin mb-3" />
-                <p className="text-sm font-semibold text-zinc-300">Richiesta Accesso Fotocamera...</p>
-                <p className="text-[11px] text-zinc-500 max-w-sm mt-1.5 leading-relaxed">
-                  Consenti l'uso della fotocamera se richiesto dal browser.
-                </p>
+                <p className="text-sm font-semibold text-zinc-300">Avvio fotocamera...</p>
+                <p className="text-[11px] text-zinc-500 max-w-sm mt-1.5">Consenti l'accesso alla fotocamera se richiesto dal browser.</p>
               </div>
 
             ) : error ? (
               <div className="w-full aspect-video rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-col items-center justify-center p-6 text-center">
                 <AlertCircle className="w-10 h-10 text-red-500 mb-3" />
-                <h4 className="text-sm font-bold text-red-400 uppercase tracking-widest mb-1.5">Fotocamera non Disponibile</h4>
+                <h4 className="text-sm font-bold text-red-400 uppercase tracking-widest mb-1.5">Fotocamera non disponibile</h4>
                 <p className="text-[11px] text-zinc-400 max-w-sm leading-relaxed mb-4">{error}</p>
-                <button
-                  onClick={startCamera}
-                  className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-5 rounded-full transition uppercase tracking-wider"
-                >
+                <button onClick={startCamera} className="text-xs bg-red-600 hover:bg-red-700 text-white font-bold py-1.5 px-5 rounded-full transition uppercase tracking-wider">
                   Riprova
                 </button>
               </div>
@@ -325,12 +290,9 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
                 <Camera className="w-10 h-10 text-zinc-500 mb-3" />
                 <p className="text-sm font-semibold text-zinc-300">Scansiona con la Fotocamera</p>
                 <p className="text-[11px] text-zinc-500 max-w-xs mt-1 leading-relaxed">
-                  Scatta una foto della copertina o del codice a barre per compilare automaticamente i dettagli del libro.
+                  Scatta una foto della copertina o del codice a barre per compilare automaticamente i dettagli.
                 </p>
-                <button
-                  onClick={startCamera}
-                  className="mt-4 text-xs bg-red-600 hover:bg-red-700 text-white py-2 px-5 rounded-full font-bold uppercase tracking-wider transition"
-                >
+                <button onClick={startCamera} className="mt-4 text-xs bg-red-600 hover:bg-red-700 text-white py-2 px-5 rounded-full font-bold uppercase tracking-wider transition">
                   Attiva Fotocamera
                 </button>
               </div>
@@ -350,9 +312,7 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             className={`border-2 border-dashed rounded-xl p-5 text-center transition relative ${
-              isDragActive
-                ? 'border-red-500 bg-red-950/10'
-                : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/20'
+              isDragActive ? 'border-red-500 bg-red-950/10' : 'border-zinc-800 hover:border-zinc-700 bg-zinc-900/20'
             }`}
           >
             <input
@@ -362,26 +322,21 @@ export default function ScannerModal({ onClose, onScanSuccess }: ScannerModalPro
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               disabled={isLoading}
             />
-            <div className="flex flex-col items-center justify-center space-y-2">
+            <div className="flex flex-col items-center gap-2">
               <Upload className="w-6 h-6 text-zinc-500" />
-              <div>
-                <span className="text-xs font-bold text-zinc-300">Trascina un'immagine</span>
-                <span className="text-xs text-zinc-500 block">del retro col codice a barre o della copertina</span>
-              </div>
-              <p className="text-[10px] text-red-500 font-bold uppercase pt-1">Sfoglia File</p>
+              <span className="text-xs font-bold text-zinc-300">Trascina un'immagine</span>
+              <span className="text-xs text-zinc-500">del retro col codice a barre o della copertina</span>
+              <p className="text-[10px] text-red-500 font-bold uppercase">Sfoglia File</p>
             </div>
           </div>
         </div>
 
-        {/* Hidden canvas */}
+        {/* Canvas nascosto */}
         <canvas ref={canvasRef} className="hidden" />
 
         {/* Footer */}
         <div className="px-6 py-4 bg-zinc-900 border-t border-zinc-800 text-right">
-          <button
-            onClick={onClose}
-            className="text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-white transition py-2 px-5 rounded bg-zinc-800 hover:bg-zinc-700"
-          >
+          <button onClick={onClose} className="text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-white transition py-2 px-5 rounded bg-zinc-800 hover:bg-zinc-700">
             Annulla
           </button>
         </div>
