@@ -1,11 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI, Type } from '@google/genai';
-
-function getGemini() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY non configurata.');
-  return new GoogleGenAI({ apiKey: key, httpOptions: { headers: { 'User-Agent': 'aistudio-build' } } });
-}
 
 async function fetchGoogleBooks(query: string, limit = 1) {
   try {
@@ -36,49 +29,77 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Immagine richiesta in formato Base64.' });
   }
 
-  try {
-    const ai = getGemini();
-    const base64Clean = image.replace(/^data:image\/\w+;base64,/, '');
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurata.' });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: 'image/jpeg', data: base64Clean } },
-          { text: `Analizza questa foto per scansionare un libro. Leggi il codice a barre o la copertina ed estrai tutti i dettagli in italiano. Restituisci SOLO JSON.` }
-        ]
+  try {
+    const base64Clean = image.replace(/^data:image\/\w+;base64,/, '');
+    const mimeType = image.match(/^data:(image\/\w+);base64,/)?.[1] || 'image/jpeg';
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
       },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            author: { type: Type.STRING },
-            genre: { type: Type.STRING },
-            pages: { type: Type.INTEGER },
-            description: { type: Type.STRING },
-            ean: { type: Type.STRING },
-            confidence: { type: Type.STRING },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mimeType,
+                  data: base64Clean,
+                },
+              },
+              {
+                type: 'text',
+                text: `Analizza questa foto di un libro. Potrebbe mostrare la copertina, il retro con codice a barre, o un codice EAN/ISBN.
+Estrai tutti i dettagli del libro in italiano.
+Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick, senza testo prima o dopo. Struttura esatta:
+{"title":"...","author":"...","genre":"...","pages":300,"description":"...","ean":"","confidence":"alta"}
+
+Genere deve essere uno tra: Romanzo, Thriller, Giallo, Fantasy, Fantascienza, Storico, Saggistica, Biografia, Psicologia, Filosofia, Avventura, Horror, Romantico, Classici, Generico.
+Se non riesci a leggere il libro, metti "Sconosciuto" nel titolo.`,
+              },
+            ],
           },
-          required: ['title', 'author', 'genre', 'pages'],
-        },
-      },
+        ],
+      }),
     });
 
-    const parsed = JSON.parse(response.text?.trim() || '{}');
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Anthropic API error: ${err}`);
+    }
 
-    if (parsed.title && parsed.title !== 'Sconosciuto') {
-      const enrichment = await fetchGoogleBooks(`${parsed.title} ${parsed.author || ''}`, 1);
-      if (enrichment.length > 0) {
-        parsed.coverUrl = enrichment[0].coverUrl;
-        if (!parsed.ean && enrichment[0].ean) parsed.ean = enrichment[0].ean;
-      }
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Nessun JSON trovato nella risposta.');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    if (!parsed.title || parsed.title === 'Sconosciuto') {
+      return res.status(200).json({ success: false, error: 'Libro non riconosciuto. Prova a inquadrare meglio la copertina o il codice a barre.' });
+    }
+
+    // Arricchisci con copertina da Google Books
+    const enrichment = await fetchGoogleBooks(`${parsed.title} ${parsed.author || ''}`, 1);
+    if (enrichment.length > 0) {
+      parsed.coverUrl = enrichment[0].coverUrl;
+      if (!parsed.ean && enrichment[0].ean) parsed.ean = enrichment[0].ean;
     }
 
     res.json({ success: true, book: parsed });
   } catch (err: any) {
     console.error('Scan error:', err);
-    res.status(500).json({ error: 'Scansione fallita. Assicurati che il libro sia ben illuminato, o inseriscilo manualmente.' });
+    res.status(500).json({ error: 'Scansione fallita. Prova a inquadrare meglio il libro o inseriscilo manualmente.' });
   }
 }
