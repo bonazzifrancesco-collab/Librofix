@@ -63,44 +63,42 @@ export default function RecommendationsList({
     setBookDetail({ description: '', googleLink: '', amazonLink: '', ibsLink: '', publishedDate: '', publisher: '', loading: true });
 
     try {
-      const key = '';
-      const query = encodeURIComponent(`${rec.title} ${rec.author}`);
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1`);
+      const query = encodeURIComponent(rec.title + ' ' + rec.author);
+      const res = await fetch('https://www.googleapis.com/books/v1/volumes?q=' + query + '&maxResults=1');
       const data = await res.json();
 
-      if (data.items?.[0]) {
-        const info = data.items[0].volumeInfo;
-        const titleSlug = encodeURIComponent(rec.title);
-        const authorSlug = encodeURIComponent(rec.author);
+      const titleSlug = encodeURIComponent(rec.title);
+      const authorSlug = encodeURIComponent(rec.author);
 
+      if (data.items && data.items[0]) {
+        const info = data.items[0].volumeInfo;
         setBookDetail({
           description: info.description || rec.description || 'Nessuna trama disponibile.',
-          googleLink: info.infoLink || `https://books.google.com/books?q=${query}`,
-          amazonLink: `https://www.amazon.it/s?k=${titleSlug}+${authorSlug}`,
-          ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${titleSlug}+${authorSlug}`,
+          googleLink: info.infoLink || ('https://books.google.com/books?q=' + query),
+          amazonLink: 'https://www.amazon.it/s?k=' + titleSlug + '+' + authorSlug,
+          ibsLink: 'https://www.ibs.it/libri/ricerca?ts=libri&query=' + titleSlug + '+' + authorSlug,
           publishedDate: info.publishedDate || '',
           publisher: info.publisher || '',
           loading: false,
         });
       } else {
-        const titleSlug = encodeURIComponent(rec.title);
-        const authorSlug = encodeURIComponent(rec.author);
         setBookDetail({
           description: rec.description || 'Nessuna trama disponibile.',
-          googleLink: `https://books.google.com/books?q=${query}`,
-          amazonLink: `https://www.amazon.it/s?k=${titleSlug}+${authorSlug}`,
-          ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${titleSlug}+${authorSlug}`,
+          googleLink: 'https://books.google.com/books?q=' + query,
+          amazonLink: 'https://www.amazon.it/s?k=' + titleSlug + '+' + authorSlug,
+          ibsLink: 'https://www.ibs.it/libri/ricerca?ts=libri&query=' + titleSlug + '+' + authorSlug,
           publishedDate: '',
           publisher: '',
           loading: false,
         });
       }
     } catch {
+      const titleSlug = encodeURIComponent(rec.title);
       setBookDetail({
         description: rec.description || 'Nessuna trama disponibile.',
         googleLink: '',
-        amazonLink: `https://www.amazon.it/s?k=${encodeURIComponent(rec.title)}`,
-        ibsLink: `https://www.ibs.it/libri/ricerca?ts=libri&query=${encodeURIComponent(rec.title)}`,
+        amazonLink: 'https://www.amazon.it/s?k=' + titleSlug,
+        ibsLink: 'https://www.ibs.it/libri/ricerca?ts=libri&query=' + titleSlug,
         publishedDate: '',
         publisher: '',
         loading: false,
@@ -118,7 +116,6 @@ export default function RecommendationsList({
   return (
     <div className="space-y-6">
 
-      {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-zinc-900 pb-4">
         <div>
           <h2 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
@@ -171,7 +168,6 @@ export default function RecommendationsList({
                 onClick={() => openDetail(rec)}
                 className="group bg-zinc-900/40 border border-zinc-900 rounded-xl overflow-hidden shadow-md flex flex-col h-[400px] hover:scale-[1.03] hover:shadow-xl hover:shadow-black/60 transition duration-300 cursor-pointer"
               >
-                {/* Card header */}
                 <div className="h-32 bg-gradient-to-br from-zinc-850 via-zinc-900 to-black relative p-4 flex items-end justify-between border-b border-zinc-800">
                   <div className="absolute top-3 left-3 bg-green-500/10 border border-green-500/20 py-0.5 px-2 rounded text-[10px] font-black tracking-wider text-green-400">
                     {rec.matchPercentage}% MATCH
@@ -195,20 +191,22 @@ export default function RecommendationsList({
                   </div>
                 </div>
 
-                {/* Card body */}
                 <div className="p-4 flex-1 flex flex-col justify-between bg-zinc-950/50">
                   <div className="space-y-3 flex-1 overflow-hidden">
                     <div className="bg-zinc-900/80 border-l-2 border-amber-500 rounded p-2 text-[10px] text-zinc-300 leading-normal italic flex items-start gap-1">
                       <ThumbsUp className="w-3 h-3 text-amber-400 shrink-0 mt-0.5" />
-                      <div><span className="font-bold text-amber-200 not-italic">Perché consigliato: </span>{rec.reason}</div>
+                      <div>
+                        <span className="font-bold text-amber-200 not-italic">Perche consigliato: </span>
+                        {rec.reason}
+                      </div>
                     </div>
                     <p className="text-[11px] text-zinc-400 leading-relaxed line-clamp-3">{rec.description}</p>
-                    <p className="text-[9px] text-zinc-600 italic">↗ Clicca per trama completa e prezzi</p>
+                    <p className="text-[9px] text-zinc-600 italic">Clicca per trama completa e prezzi</p>
                   </div>
                   <div className="mt-4 pt-3 border-t border-zinc-900 shrink-0" onClick={e => e.stopPropagation()}>
                     {alreadyInLibrary ? (
                       <div className="w-full bg-zinc-900 text-zinc-500 text-[10px] uppercase tracking-widest font-black py-2.5 rounded-lg flex items-center justify-center gap-2 border border-zinc-800 cursor-not-allowed">
-                        <Check className="w-3.5 h-3.5" /> Già in Libreria
+                        <Check className="w-3.5 h-3.5" /> Gia in Libreria
                       </div>
                     ) : (
                       <button
@@ -226,12 +224,10 @@ export default function RecommendationsList({
         </div>
       )}
 
-      {/* Modal dettaglio */}
       {selectedRec && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
           <div className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
 
-            {/* Header modal con copertina */}
             <div className="relative shrink-0">
               {selectedRec.coverUrl ? (
                 <div className="h-48 overflow-hidden relative">
@@ -245,48 +241,48 @@ export default function RecommendationsList({
                 <X className="w-4 h-4" />
               </button>
               <div className="absolute bottom-0 left-0 right-0 p-5">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className="text-[9px] px-2 py-0.5 bg-red-600 text-white rounded font-bold uppercase tracking-widest">{selectedRec.genre}</span>
                   <span className="bg-green-500/10 border border-green-500/20 text-green-400 text-[10px] font-black px-2 py-0.5 rounded-full">{selectedRec.matchPercentage}% MATCH</span>
                   {selectedRec.pages && <span className="text-zinc-500 text-[10px]">{selectedRec.pages} pag.</span>}
                 </div>
                 <h2 className="text-xl font-black text-white font-serif">{selectedRec.title}</h2>
                 <p className="text-sm text-zinc-400">di {selectedRec.author}</p>
-                {bookDetail?.publishedDate && <p className="text-[10px] text-zinc-500 mt-0.5">{bookDetail.publisher} · {bookDetail.publishedDate.slice(0, 4)}</p>}
+                {bookDetail && bookDetail.publishedDate && (
+                  <p className="text-[10px] text-zinc-500 mt-0.5">{bookDetail.publisher} {bookDetail.publishedDate.slice(0, 4)}</p>
+                )}
               </div>
             </div>
 
-            {/* Body modal scrollabile */}
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
-
-              {/* Perché consigliato */}
               <div className="bg-zinc-900/80 border-l-2 border-amber-500 rounded p-3 text-xs text-zinc-300 leading-relaxed italic">
-                <span className="font-bold text-amber-200 not-italic">Perché ti piacerà: </span>{selectedRec.reason}
+                <span className="font-bold text-amber-200 not-italic">Perche ti piacera: </span>
+                {selectedRec.reason}
               </div>
 
-              {/* Trama */}
               <div>
                 <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2 flex items-center gap-1.5">
                   <BookOpen className="w-3.5 h-3.5" /> Trama
                 </h4>
-                {bookDetail?.loading ? (
+                {bookDetail && bookDetail.loading ? (
                   <div className="flex items-center gap-2 text-zinc-500 text-xs">
                     <Loader className="w-4 h-4 animate-spin" /> Caricamento trama da Google Books...
                   </div>
                 ) : (
-                  <p className="text-sm text-zinc-300 leading-relaxed">{bookDetail?.description || selectedRec.description}</p>
+                  <p className="text-sm text-zinc-300 leading-relaxed">
+                    {bookDetail ? bookDetail.description : selectedRec.description}
+                  </p>
                 )}
               </div>
 
-              {/* Link acquisto */}
-              {!bookDetail?.loading && (
+              {bookDetail && !bookDetail.loading && (
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-widest text-zinc-400 mb-2 flex items-center gap-1.5">
                     <ShoppingCart className="w-3.5 h-3.5" /> Dove Acquistare
                   </h4>
                   <div className="grid grid-cols-3 gap-2">
-                    {bookDetail?.amazonLink && (
-                      
+                    {bookDetail.amazonLink && (
+                      <a
                         href={bookDetail.amazonLink}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -297,8 +293,8 @@ export default function RecommendationsList({
                         <ExternalLink className="w-3 h-3 text-amber-500" />
                       </a>
                     )}
-                    {bookDetail?.ibsLink && (
-                      
+                    {bookDetail.ibsLink && (
+                      <a
                         href={bookDetail.ibsLink}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -309,8 +305,8 @@ export default function RecommendationsList({
                         <ExternalLink className="w-3 h-3 text-blue-500" />
                       </a>
                     )}
-                    {bookDetail?.googleLink && (
-                      
+                    {bookDetail.googleLink && (
+                      <a
                         href={bookDetail.googleLink}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -326,7 +322,6 @@ export default function RecommendationsList({
               )}
             </div>
 
-            {/* Footer modal */}
             <div className="p-4 border-t border-zinc-800 flex gap-3 shrink-0">
               <button onClick={closeDetail} className="flex-1 text-xs font-bold uppercase text-zinc-400 hover:text-white py-2.5 px-4 rounded-lg bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 transition">
                 Chiudi
@@ -340,9 +335,11 @@ export default function RecommendationsList({
                 </button>
               )}
             </div>
+
           </div>
         </div>
       )}
+
     </div>
   );
 }
