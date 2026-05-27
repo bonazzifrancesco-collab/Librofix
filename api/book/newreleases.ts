@@ -8,38 +8,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Generi richiesti.' });
   }
 
-  try {
-    const key = process.env.GOOGLE_BOOKS_API_KEY ? `&key=${process.env.GOOGLE_BOOKS_API_KEY}` : '';
-    const genreQuery = genres.slice(0, 3).join('|');
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurata.' });
 
-    const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=subject:${encodeURIComponent(genreQuery)}&orderBy=newest&maxResults=12&langRestrict=it${key}`
+  try {
+    const currentYear = new Date().getFullYear();
+    const prompt = `Sei un esperto libraio italiano aggiornato sulle ultime uscite editoriali.
+
+Genera una lista di 12 libri REALI usciti tra il ${currentYear - 1} e il ${currentYear} nei seguenti generi: ${genres.join(', ')}.
+
+I libri DEVONO essere reali, pubblicati di recente, e preferibilmente disponibili in italiano (originali italiani o traduzioni recenti).
+
+Rispondi SOLO con un oggetto JSON valido, senza markdown, senza backtick. Struttura esatta:
+{"books":[{"title":"...","author":"...","genre":"...","pages":300,"description":"Breve trama in italiano (2 frasi)","publishedDate":"2024","publisher":"..."}]}`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': anthropicKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!response.ok) throw new Error('Anthropic API error');
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text || '';
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('Nessun JSON trovato.');
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    const booksWithCovers = await Promise.all(
+      (parsed.books || []).map(async (book: any) => {
+        try {
+          const key = process.env.GOOGLE_BOOKS_API_KEY ? '&key=' + process.env.GOOGLE_BOOKS_API_KEY : '';
+          const query = encodeURIComponent(book.title + ' ' + book.author);
+          const gbRes = await fetch('https://www.googleapis.com/books/v1/volumes?q=' + query + '&maxResults=1' + key);
+          if (gbRes.ok) {
+            const gbData = await gbRes.json();
+            if (gbData.items?.[0]) {
+              const info = gbData.items[0].volumeInfo;
+              let coverUrl = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '';
+              if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
+              return { ...book, coverUrl };
+            }
+          }
+        } catch {}
+        return { ...book, coverUrl: '' };
+      })
     );
 
-    if (!response.ok) throw new Error('Google Books non risponde.');
-    const data = await response.json();
-    if (!data.items) return res.json({ books: [] });
-
-    const books = data.items.map((item: any) => {
-      const info = item.volumeInfo || {};
-      const isbnObj = info.industryIdentifiers?.find((id: any) => id.type === 'ISBN_13') || info.industryIdentifiers?.[0];
-      let coverUrl = info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '';
-      if (coverUrl.startsWith('http://')) coverUrl = coverUrl.replace('http://', 'https://');
-      return {
-        title: info.title || 'Titolo Sconosciuto',
-        author: info.authors?.join(', ') || 'Autore Sconosciuto',
-        genre: info.categories?.[0] || genres[0] || 'Generico',
-        pages: info.pageCount || 200,
-        description: info.description || 'Nessuna descrizione disponibile.',
-        ean: isbnObj?.identifier || '',
-        coverUrl,
-        publishedDate: info.publishedDate || '',
-      };
-    }).filter((b: any) => b.coverUrl); // mostra solo libri con copertina
-
-    res.json({ books });
+    res.json({ books: booksWithCovers });
   } catch (err: any) {
     console.error('Newreleases error:', err);
-    res.status(500).json({ error: 'Errore nel recupero delle novità.' });
+    res.status(500).json({ error: 'Errore nel recupero delle novita.' });
   }
 }
